@@ -73,6 +73,17 @@ class TestCheckTermination:
         assert result.reason == "pool_empty"
         assert result.auto_finalize is False
 
+    def test_current_best_equals_baseline_is_not_a_win(self) -> None:
+        # Pins the _has_wins invariant: current_best == baseline.value does NOT
+        # count as a win, so pool_empty should not auto-finalize. Without this
+        # test, someone simplifying _has_wins to `is not None` would slip past.
+        pool = [Candidate(id=1, name="a", expected_impact_pct=-10, status="reverted")]
+        s = _state(pool=pool, current_best=100.0)  # equal to baseline_value
+        result = check_termination(s, experiments_run=1, consecutive_reverts=1)
+        assert result.terminated is True
+        assert result.reason == "pool_empty"
+        assert result.auto_finalize is False
+
     def test_max_experiments_hit_with_wins(self) -> None:
         s = _state(current_best=95.0)
         result = check_termination(s, experiments_run=50, consecutive_reverts=0)
