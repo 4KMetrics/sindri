@@ -53,6 +53,23 @@ class TestScriptContentSignal:
         with pytest.raises(FileNotFoundError):
             script_content_signal(tmp_path / "no-such-file.py")
 
+    def test_wget_with_remote_url_flags_remote(self, tmp_path: Path) -> None:
+        script = tmp_path / "benchmark.py"
+        script.write_text("subprocess.run(['wget', 'https://example.com/data'])")
+        assert script_content_signal(script) == "remote"
+
+    def test_curlicue_does_not_flag_remote(self, tmp_path: Path) -> None:
+        # Word-boundary guard: `curlicue` must not match `curl`.
+        script = tmp_path / "benchmark.py"
+        script.write_text("# this benchmark measures curlicue complexity\nprint('METRIC x=1')\n")
+        assert script_content_signal(script) == "local"
+
+    def test_ghost_does_not_flag_remote(self, tmp_path: Path) -> None:
+        # Word-boundary guard: `ghost` must not match `gh`.
+        script = tmp_path / "benchmark.py"
+        script.write_text("# count ghost references\nprint('METRIC x=1')\n")
+        assert script_content_signal(script) == "local"
+
 
 class TestDetectMode:
     def test_local_script_low_cv_is_local(self, tmp_path: Path) -> None:
@@ -69,3 +86,9 @@ class TestDetectMode:
         script = tmp_path / "benchmark.py"
         script.write_text("subprocess.run(['gh', 'workflow', 'run'])")
         assert detect_mode(script, [500.0, 100.0, 100.5, 99.5]) == "remote"
+
+    def test_too_few_baseline_samples_falls_through_to_local(self, tmp_path: Path) -> None:
+        # When post-warmup sample count < 2, CV signal is skipped; default local.
+        script = tmp_path / "benchmark.py"
+        script.write_text("print('METRIC x=1')")
+        assert detect_mode(script, [100.0, 101.0]) == "local"  # only 1 post-warmup sample

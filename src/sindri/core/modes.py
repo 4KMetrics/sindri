@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from sindri.core.noise import coefficient_of_variation
+from sindri.core.noise import NoiseComputationError, coefficient_of_variation
 
 # Tools that imply external-service calls (networked, cost-bearing, rate-limited).
 _REMOTE_TOOLS = [
@@ -37,7 +37,7 @@ _CURL_WITH_REMOTE_URL = re.compile(
     re.IGNORECASE,
 )
 
-_COMBINED_REMOTE_RE = re.compile("|".join(_REMOTE_TOOLS))
+_COMBINED_REMOTE_RE = re.compile("|".join(_REMOTE_TOOLS), re.IGNORECASE)
 
 # CV threshold above which observed noise triggers remote mode.
 CV_REMOTE_THRESHOLD = 0.15
@@ -45,7 +45,8 @@ CV_REMOTE_THRESHOLD = 0.15
 
 def script_content_signal(script_path: Path) -> Literal["local", "remote"]:
     """Scan script content for external-tool references."""
-    text = script_path.read_text()
+    # Cap at 1 MiB — we're scanning for keywords, not loading bundles.
+    text = script_path.read_text()[: 1 << 20]
     # Check tools first (cheap regex)
     if _COMBINED_REMOTE_RE.search(text):
         return "remote"
@@ -72,7 +73,7 @@ def detect_mode(
     if len(post_warmup) >= 2:
         try:
             cv = coefficient_of_variation(post_warmup)
-        except Exception:  # NoiseComputationError - don't crash detection
+        except NoiseComputationError:
             cv = 0.0
         if cv > CV_REMOTE_THRESHOLD:
             return "remote"
