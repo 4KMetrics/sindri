@@ -9,6 +9,8 @@ import argparse
 import sys
 from typing import Callable
 
+import re
+
 from sindri import __version__
 
 _HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {}
@@ -40,6 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_generate_pr_body(sub)
     _add_archive(sub)
     _add_status(sub)
+    _add_init(sub)
     return p
 
 
@@ -392,6 +395,188 @@ def _handle_status(args: argparse.Namespace) -> int:
     print(
         f"  pool:      {len(state.pool)} total · {kept} kept · {reverted} reverted "
         f"· {dead} dead · {pending} pending"
+    )
+    return 0
+
+
+_GOAL_RE = re.compile(
+    r"(?P<direction>reduce|increase)\s+(?P<metric>[a-z][a-z0-9_]*)"
+    r"\s+by\s+(?P<pct>\d+(?:\.\d+)?)\s*%",
+    re.IGNORECASE,
+)
+
+
+def _add_init(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "init",
+        help="initialize a new sindri run from a goal and candidate pool",
+    )
+    p.add_argument(
+        "--goal",
+        required=True,
+        help="goal string, e.g. 'reduce bundle_bytes by 15%%'",
+    )
+    p.add_argument(
+        "--pool-json",
+        required=True,
+        help="JSON array of candidate dicts "
+        "(id, name, expected_impact_pct, optional files)",
+    )
+    p.add_argument(
+        "--script",
+        default=".claude/scripts/sindri/benchmark.py",
+        help="path to benchmark script",
+    )
+
+
+@_register("init")
+def _handle_init(args: argparse.Namespace) -> int:
+    import json
+    import subprocess as sp
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from sindri.core.git_ops import GitError, create_branch
+    from sindri.core.metric import MetricParseError, parse_metric_line
+    from sindri.core.modes import detect_mode
+    from sindri.core.noise import noise_floor
+    from sindri.core.state import append_jsonl, write_state
+    from sindri.core.validators import (
+        Baseline,
+        Candidate,
+        Goal,
+        Guardrails,
+        JsonlBaseline,
+        JsonlBaselineComplete,
+        JsonlSessionStart,
+        SindriState,
+    )
+
+    current_dir = Path(".sindri/current")
+    if current_dir.exists():
+        print(
+            "error: .sindri/current/ already exists — another run is active",
+            file=sys.stderr,
+        )
+        return 1
+
+    m = _GOAL_RE.search(args.goal)
+    if not m:
+        print(
+            "error: malformed goal — expected 'reduce|increase <metric> by <N>%'",
+            file=sys.stderr,
+        )
+        return 1
+    direction = m.group("direction").lower()
+    metric_name = m.group("metric")
+    target_pct = float(m.group("pct"))
+
+    try:
+        goal = Goal(
+            metric_name=metric_name,
+            direction=direction,  # type: ignore[arg-type]
+            target_pct=target_pct,
+        )
+    except Exception as e:
+        print(f"error: invalid goal: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        pool_raw = json.loads(args.pool_json)
+        pool = [Candidate(**c) for c in pool_raw]
+    except Exception as e:
+        print(f"error: invalid pool-json: {e}", file=sys.stderr)
+        return 1
+
+    script = Path(args.script)
+    if not script.exists():
+        print(f"error: benchmark.py not found at {script}", file=sys.stderr)
+        return 1
+
+    samples: list[float] = []
+    for run_idx in range(1, 4):
+        try:
+            proc = sp.run(
+                [sys.executable, str(script)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1800,
+            )
+        except sp.TimeoutExpired:
+            print(
+                f"error: benchmark timed out during baseline run {run_idx}",
+                file=sys.stderr,
+            )
+            return 1
+        if proc.returncode != 0:
+            print(
+                f"error: benchmark failed on baseline run {run_idx}: "
+                f"{proc.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            _, value = parse_metric_line(proc.stdout, expected_name=metric_name)
+        except MetricParseError as e:
+            print(f"error: baseline run {run_idx}: {e}", file=sys.stderr)
+            return 1
+        samples.append(value)
+
+    try:
+        sigma = noise_floor(samples)
+    except Exception as e:
+        print(f"error: noise floor computation failed: {e}", file=sys.stderr)
+        return 1
+
+    # Post-warmup mean: drop the first sample (JIT / cold cache).
+    post_warmup = samples[1:]
+    mean_val = sum(post_warmup) / len(post_warmup)
+    mode = detect_mode(script, samples)
+
+    slug = f"{direction}-{metric_name.replace('_', '-')}-{int(target_pct)}pct"
+    branch_name = f"sindri/{slug}"
+    try:
+        create_branch(branch_name)
+    except GitError as e:
+        print(f"error: could not create branch: {e}", file=sys.stderr)
+        return 1
+
+    now = datetime.now(tz=timezone.utc)
+    state = SindriState(
+        goal=goal,
+        baseline=Baseline(value=mean_val, noise_floor=sigma, samples=samples),
+        pool=pool,
+        branch=branch_name,
+        started_at=now,
+        guardrails=Guardrails(mode=mode),  # type: ignore[arg-type]
+        mode=mode,
+    )
+    write_state(state)
+
+    sign = "-" if direction == "reduce" else "+"
+    append_jsonl(
+        JsonlSessionStart(
+            ts=now,
+            goal=args.goal,
+            target_pct=float(f"{sign}{target_pct}"),
+            mode=mode,
+        )
+    )
+    for i, v in enumerate(samples, start=1):
+        append_jsonl(JsonlBaseline(ts=now, run_index=i, value=v, is_warmup=(i == 1)))
+    append_jsonl(JsonlBaselineComplete(ts=now, mean=mean_val, noise_floor=sigma))
+
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "branch": branch_name,
+                "baseline": mean_val,
+                "noise_floor": sigma,
+                "mode": mode,
+            }
+        )
     )
     return 0
 

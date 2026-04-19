@@ -31,9 +31,19 @@ class TestCliBasics:
     def test_help_lists_subcommands(self) -> None:
         r = _run_cli("--help")
         assert r.returncode == 0
-        # Subcommand set is grown incrementally per-task; the final broadening
-        # back to all 10 happens in Task 21 once every `_add_*` is registered.
-        assert "validate-benchmark" in r.stdout
+        for sub in [
+            "validate-benchmark",
+            "detect-mode",
+            "read-state",
+            "pick-next",
+            "record-result",
+            "check-termination",
+            "generate-pr-body",
+            "archive",
+            "status",
+            "init",
+        ]:
+            assert sub in r.stdout, f"{sub} missing from --help"
 
     def test_unknown_subcommand_exits_nonzero(self) -> None:
         r = _run_cli("totally-made-up")
@@ -491,3 +501,68 @@ class TestStatus:
         assert "760" in r.stdout
         assert "reduce" in r.stdout.lower() or "bundle_bytes" in r.stdout.lower()
         assert "2" in r.stdout
+
+
+class TestInit:
+    def test_init_creates_state_from_goal(self, tmp_path: Path) -> None:
+        (tmp_path / "README.md").write_text("# test\n")
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('METRIC bundle_bytes=100')\n"
+        )
+        script.chmod(0o755)
+
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+
+        pool_json = json.dumps([
+            {"id": 1, "name": "Replace moment", "expected_impact_pct": -10.0},
+            {"id": 2, "name": "Tree-shake", "expected_impact_pct": -5.0},
+        ])
+        r = _run_cli(
+            "init",
+            "--goal", "reduce bundle_bytes by 15%",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["ok"] is True
+
+        state_file = tmp_path / ".sindri" / "current" / "sindri.md"
+        assert state_file.exists()
+
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=tmp_path, capture_output=True, text=True,
+        )
+        assert "sindri/" in result.stdout
+
+    def test_init_rejects_existing_current(self, tmp_path: Path) -> None:
+        (tmp_path / ".sindri" / "current").mkdir(parents=True)
+        (tmp_path / ".sindri" / "current" / "sindri.md").write_text("existing")
+        pool_json = json.dumps([])
+        r = _run_cli(
+            "init",
+            "--goal", "reduce x by 10%",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        assert r.returncode != 0
+        assert "current" in r.stderr.lower()
+
+    def test_init_rejects_malformed_goal(self, tmp_path: Path) -> None:
+        pool_json = json.dumps([])
+        r = _run_cli(
+            "init",
+            "--goal", "make it faster",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        assert r.returncode != 0
