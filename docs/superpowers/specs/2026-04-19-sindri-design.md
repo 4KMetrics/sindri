@@ -23,8 +23,6 @@ The name comes from Norse mythology: Sindri was the dwarf smith who forged Mjöl
 
 ## 2. Context & motivation
 
-### 2.1 What this replaces / augments
-
 In late-model LLM research, [karpathy/autoresearch](https://github.com/karpathy/autoresearch) established the pattern: give an AI agent one file to edit (`train.py`), one benchmark (5-minute training run measuring `val_bpb`), and let it run overnight. [davebcn87/pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) generalized that pattern to arbitrary optimization domains — bundle size, test speed, build time, Lighthouse score — for the [pi.dev](https://pi.dev) agent platform.
 
 Sindri adapts that generalized pattern to **Claude Code**, respecting three differences:
@@ -32,10 +30,6 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 1. Claude Code's loop primitive (`ScheduleWakeup` / `/loop`-dynamic) is paced, not tight-loop re-injection. That's a better fit for benchmarks whose reps take seconds-to-minutes rather than milliseconds.
 2. Claude Code's subagent model (`Task` tool) allows clean-context isolation per experiment — superior to the single-session model pi uses. Context bleed across experiments is an insidious correctness problem; we eliminate it.
 3. Claude Code users want finished PRs, not raw branches. Sindri owns the full path from goal to mergeable PR.
-
-### 2.2 Where this fits the user's roadmap
-
-This is reusable infrastructure — install it once, use it against any repo. It's aligned with the user's "infrastructure ready, deploy" north star: a force multiplier across Kubernetes, Terraform, and future projects rather than a single-domain toy.
 
 ## 3. Goals and non-goals
 
