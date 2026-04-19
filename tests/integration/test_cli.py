@@ -31,20 +31,52 @@ class TestCliBasics:
     def test_help_lists_subcommands(self) -> None:
         r = _run_cli("--help")
         assert r.returncode == 0
-        for sub in [
-            "validate-benchmark",
-            "read-state",
-            "pick-next",
-            "record-result",
-            "check-termination",
-            "generate-pr-body",
-            "archive",
-            "status",
-            "detect-mode",
-            "init",
-        ]:
-            assert sub in r.stdout, f"{sub} missing from --help"
+        # Subcommand set is grown incrementally per-task; the final broadening
+        # back to all 10 happens in Task 21 once every `_add_*` is registered.
+        assert "validate-benchmark" in r.stdout
 
     def test_unknown_subcommand_exits_nonzero(self) -> None:
         r = _run_cli("totally-made-up")
+        assert r.returncode != 0
+
+
+class TestValidateBenchmark:
+    def test_valid_script_returns_metric(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('METRIC bundle_bytes=842000')\n"
+        )
+        script.chmod(0o755)
+
+        r = _run_cli("validate-benchmark", "--expected", "bundle_bytes", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["metric_name"] == "bundle_bytes"
+        assert data["metric_value"] == 842000.0
+        assert data["ok"] is True
+
+    def test_missing_script(self, tmp_path: Path) -> None:
+        r = _run_cli("validate-benchmark", cwd=tmp_path)
+        assert r.returncode != 0
+        assert "benchmark.py" in r.stderr
+
+    def test_script_no_metric_line(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text("#!/usr/bin/env python3\nprint('hello')\n")
+        script.chmod(0o755)
+        r = _run_cli("validate-benchmark", cwd=tmp_path)
+        assert r.returncode != 0
+
+    def test_expected_name_mismatch(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text("#!/usr/bin/env python3\nprint('METRIC bar=42')\n")
+        script.chmod(0o755)
+        r = _run_cli("validate-benchmark", "--expected", "foo", cwd=tmp_path)
         assert r.returncode != 0

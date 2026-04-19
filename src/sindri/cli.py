@@ -31,23 +31,63 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"sindri {__version__}")
     sub = p.add_subparsers(dest="subcommand", required=False)
 
-    # Placeholder subparsers — replaced by explicit `_add_*` calls as subcommands
-    # are implemented in later tasks. Listing them here so `--help` surfaces the
-    # full surface area early.
-    for name in [
-        "init",
-        "validate-benchmark",
-        "detect-mode",
-        "read-state",
-        "pick-next",
-        "record-result",
-        "check-termination",
-        "generate-pr-body",
-        "archive",
-        "status",
-    ]:
-        sub.add_parser(name, help=f"(not yet implemented: {name})")
+    _add_validate_benchmark(sub)
     return p
+
+
+def _add_validate_benchmark(sub: argparse._SubParsersAction) -> None:
+    vp = sub.add_parser(
+        "validate-benchmark",
+        help="run benchmark.py, check METRIC output",
+    )
+    vp.add_argument(
+        "--expected",
+        help="expected metric name; error if script outputs a different one",
+    )
+    vp.add_argument(
+        "--script",
+        default=".claude/scripts/sindri/benchmark.py",
+        help="path to benchmark script (default: .claude/scripts/sindri/benchmark.py)",
+    )
+
+
+@_register("validate-benchmark")
+def _handle_validate_benchmark(args: argparse.Namespace) -> int:
+    import json
+    import subprocess
+    from pathlib import Path
+
+    from sindri.core.metric import MetricParseError, parse_metric_line
+
+    script = Path(args.script)
+    if not script.exists():
+        print(f"error: benchmark.py not found at {script}", file=sys.stderr)
+        return 1
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        print("error: benchmark timed out during validation (>5min)", file=sys.stderr)
+        return 1
+
+    if proc.returncode != 0:
+        print(f"error: benchmark exited non-zero: {proc.stderr.strip()}", file=sys.stderr)
+        return 1
+
+    try:
+        name, value = parse_metric_line(proc.stdout, expected_name=args.expected)
+    except MetricParseError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    print(json.dumps({"ok": True, "metric_name": name, "metric_value": value}))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
