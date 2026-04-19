@@ -11,6 +11,60 @@ inspirations:
   - https://github.com/davebcn87/pi-autoresearch
 ---
 
+## Table of Contents
+
+- [1. Executive summary](#1-executive-summary)
+- [2. Context & motivation](#2-context--motivation)
+- [3. Goals and non-goals](#3-goals-and-non-goals)
+  - [3.1 Goals (v1)](#31-goals-v1)
+  - [3.2 Explicit non-goals (v1)](#32-explicit-non-goals-v1)
+- [4. Users and workflows](#4-users-and-workflows)
+  - [4.1 Primary persona](#41-primary-persona)
+  - [4.2 Primary workflow](#42-primary-workflow)
+  - [4.3 User touch points, explicit](#43-user-touch-points-explicit)
+- [5. Architecture](#5-architecture)
+  - [5.1 Two-layer shape](#51-two-layer-shape)
+  - [5.2 Three cooperating agents](#52-three-cooperating-agents)
+  - [5.3 Key architectural invariants](#53-key-architectural-invariants)
+- [6. Components — what ships in the plugin](#6-components--what-ships-in-the-plugin)
+  - [6.1 Slash command: `/sindri`](#61-slash-command-sindri)
+  - [6.2 Skill: `sindri-start`](#62-skill-sindri-start)
+  - [6.3 Skill: `sindri-scaffold-benchmark`](#63-skill-sindri-scaffold-benchmark)
+  - [6.4 Skill: `sindri-loop` (orchestrator)](#64-skill-sindri-loop-orchestrator)
+  - [6.5 Skill: `sindri-finalize` (auto-invoked on success)](#65-skill-sindri-finalize-auto-invoked-on-success)
+  - [6.6 Experiment subagent prompt template](#66-experiment-subagent-prompt-template)
+  - [6.7 Python core package (`src/sindri/`)](#67-python-core-package-srcsindri)
+- [7. Data flow — the complete lifecycle](#7-data-flow--the-complete-lifecycle)
+  - [7.1 Phase 1: Initialization](#71-phase-1-initialization-sindri-start-interactive-15-min)
+  - [7.2 Phase 2: The loop](#72-phase-2-the-loop-sindri-loop-autonomous-minutes-to-hours)
+  - [7.3 Phase 3: Termination](#73-phase-3-termination)
+  - [7.4 Phase 4: Finalize (automatic, <30s)](#74-phase-4-finalize-automatic-30s)
+- [8. State files — on-disk layout](#8-state-files--on-disk-layout)
+  - [8.1 Repo layout](#81-repo-layout)
+  - [8.2 `sindri.md` schema](#82-sindrimd-schema)
+  - [8.3 `sindri.jsonl` schema](#83-sindrijsonl-schema)
+- [9. Python core — module-by-module](#9-python-core--module-by-module)
+  - [9.1 Package layout](#91-package-layout)
+  - [9.2 Key APIs](#92-key-apis-test-first-so-these-are-what-the-tests-demand)
+- [10. Error handling & guardrails](#10-error-handling--guardrails)
+  - [10.1 Error taxonomy](#101-error-taxonomy)
+  - [10.2 Guardrails](#102-guardrails-defaults-overridable-in-sindrimd)
+  - [10.3 Explicit non-behaviors](#103-explicit-non-behaviors)
+- [11. Testing strategy (TDD)](#11-testing-strategy-tdd)
+  - [11.1 Test-first discipline](#111-test-first-discipline)
+  - [11.2 Test layers](#112-test-layers)
+  - [11.3 Specific test cases worth naming now](#113-specific-test-cases-worth-naming-now)
+  - [11.4 Continuous integration](#114-continuous-integration)
+  - [11.5 Explicit non-tests](#115-explicit-non-tests)
+- [12. v1 scope boundaries](#12-v1-scope-boundaries)
+  - [12.1 In v1](#121-in-v1)
+  - [12.2 Deferred to v2](#122-deferred-to-v2)
+  - [12.3 Open risks](#123-open-risks-flagged-for-implementation-phase)
+- [13. References](#13-references)
+- [14. Appendix A: sample run walkthrough](#14-appendix-a-sample-run-walkthrough)
+
+---
+
 ## 1. Executive summary
 
 **Sindri is a Claude Code plugin that runs bounded, target-driven optimization loops against any metric a user can measure deterministically.**
