@@ -207,7 +207,7 @@ The skills invoke the Python core via the `Bash` tool: `python -m sindri <subcom
 2. **The orchestrator's per-wakeup context is small.** It reads two files, makes one `Task` call, does a git operation, writes two files, schedules a wakeup. Autocompaction is a non-issue because there's nothing meaningful to compact.
 3. **Every experiment starts from a clean subagent.** No context bleed. This is non-negotiable and is the primary reason we chose subagent-per-experiment over single-agent-looping.
 4. **Git is the audit log for kept work.** One commit per kept experiment, with the metric delta in the commit message. `sindri.jsonl` is the audit log for the full history (kept + reverted + errored).
-5. **The ratchet never reverses.** A kept commit is never un-kept by later events. Later failures cannot invalidate earlier wins. Monotone improvement is the whole point.
+5. **The forge runs one way.** A kept commit is never un-kept by later events. Later failures cannot invalidate earlier wins. Monotone improvement is the whole point: each strike either shapes the artifact or returns to the fire.
 6. **One active run per repo.** `.sindri/current/` is singleton. A new `/sindri <goal>` invocation when `current/` exists is rejected — user must resolve the existing run first.
 
 ## 6. Components — what ships in the plugin
@@ -742,7 +742,7 @@ def append_jsonl(record: JsonlRecord, path: Path = Path(".sindri/current/sindri.
 
 ### 10.3 Explicit non-behaviors
 
-- **No automatic rollback of prior kept commits.** Ratchet invariant. Once kept, forever kept.
+- **No automatic rollback of prior kept commits.** Forge invariant: once the strike landed, the shape is set. Once kept, forever kept.
 - **No "intelligent" recovery of half-applied changes.** `git reset --hard HEAD` is the only recovery primitive.
 - **No silent continuation on halt.** A halt is visible in chat. The user decides whether to resume or abandon.
 - **No retry on `check_failed`.** Tests are deterministic; retrying is theater.
