@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import pytest
 
@@ -26,13 +27,13 @@ def _state(
     *,
     pool: list[Candidate],
     current_best: float | None = None,
-    direction: str = "reduce",
+    direction: Literal["reduce", "increase"] = "reduce",
     target_pct: float = 15.0,
     baseline_value: float = 100.0,
     started_at: datetime | None = None,
 ) -> SindriState:
     return SindriState(
-        goal=Goal(metric_name="x", direction=direction, target_pct=target_pct),  # type: ignore[arg-type]
+        goal=Goal(metric_name="x", direction=direction, target_pct=target_pct),
         baseline=Baseline(value=baseline_value, noise_floor=1.0, samples=[baseline_value, baseline_value + 1, baseline_value - 1]),
         pool=pool,
         branch="sindri/test",
@@ -81,6 +82,11 @@ class TestPickNext:
         nxt = pick_next(pool)
         assert nxt is not None
         assert nxt.id == 2
+
+    def test_unknown_order_by_raises(self) -> None:
+        pool = [Candidate(id=1, name="a", expected_impact_pct=-5.0)]
+        with pytest.raises(ValueError):
+            pick_next(pool, order_by="bogus")  # type: ignore[arg-type]
 
 
 class TestTargetHit:

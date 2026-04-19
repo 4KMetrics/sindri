@@ -7,6 +7,7 @@ decision table.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from sindri.core.validators import Candidate, SindriState
 
@@ -14,7 +15,7 @@ from sindri.core.validators import Candidate, SindriState
 def pick_next(
     pool: list[Candidate],
     *,
-    order_by: str = "expected_impact_desc",
+    order_by: Literal["expected_impact_desc"] = "expected_impact_desc",
 ) -> Candidate | None:
     """Return the next candidate to run, or None if nothing is pending.
 
@@ -61,8 +62,9 @@ def max_experiments_hit(*, experiments_run: int, max_experiments: int) -> bool:
 
 
 def max_wall_clock_hit(*, started_at: datetime, max_seconds: int) -> bool:
-    now = datetime.now(tz=timezone.utc) if started_at.tzinfo else datetime.utcnow()
-    elapsed = (now - started_at).total_seconds()
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(tz=timezone.utc) - started_at).total_seconds()
     return elapsed >= max_seconds
 
 
