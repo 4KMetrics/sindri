@@ -1,0 +1,37 @@
+# sindri runtime state (always local, never committed)
+.sindri/
+
+# Claude Code / superpowers scratch
+.superpowers/
+.remember/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.python-version
+
+# uv
+uv.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
