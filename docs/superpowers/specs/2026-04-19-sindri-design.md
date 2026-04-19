@@ -115,10 +115,10 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 
 ### 4.2 Primary workflow
 
-1. User has an optimization target in mind. They already know what they want to measure.
-2. (Optional) User has a separate conversation with Claude to draft or refine `benchmark.py`. Sindri does not require this conversation — it's just a way to use Claude for script-writing outside the loop.
-3. User invokes `/sindri <goal>` in the project repo.
-4. Sindri validates or scaffolds `benchmark.py`, scans the repo, drafts ~10–30 candidates, presents them.
+1. User has an optimization target in mind. They already know *what* they want to measure; they don't need to know *how* to measure it in code.
+2. User invokes `/sindri <goal>` in the project repo.
+3. If `benchmark.py` doesn't exist, sindri writes it: scans the repo, proposes a measurement approach in plain English, shows the user the proposed `benchmark.py`, and asks "does this look right?" The user confirms, edits in natural language ("use npm not pnpm", "measure gzipped"), or hands over with their own ideas. Sindri incorporates the user's input and iterates until they accept.
+4. Sindri validates the final `benchmark.py` runs and emits a valid `METRIC` line. Scans the repo, drafts ~10–30 candidates, presents them.
 5. User approves / edits / strikes from the pool (≤1 minute).
 6. Sindri runs a baseline, establishes noise floor, starts the autonomous loop.
 7. User walks away.
