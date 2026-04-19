@@ -466,6 +466,41 @@ class TestArchive:
         r = _run_cli("archive", cwd=tmp_path)
         assert r.returncode != 0
 
+    def test_rejects_path_traversal_in_branch(self, tmp_path: Path) -> None:
+        # Simulate a tampered sindri.md whose branch field would escape the
+        # archive root. The handler must refuse rather than shutil.move into
+        # an attacker-chosen path.
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/../../evil",
+            started_at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        current = tmp_path / ".sindri" / "current"
+        write_state(state, dir=current)
+
+        r = _run_cli("archive", cwd=tmp_path)
+        assert r.returncode != 0
+        assert "unsafe" in r.stderr.lower()
+        # Nothing outside .sindri/archive/ should have been touched.
+        assert current.exists()
+        assert not (tmp_path / "evil").exists()
+        assert not (tmp_path.parent / "evil").exists()
+
 
 class TestStatus:
     def test_prints_summary(self, tmp_path: Path) -> None:

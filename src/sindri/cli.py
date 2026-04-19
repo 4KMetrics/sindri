@@ -347,9 +347,18 @@ def _handle_archive(args: argparse.Namespace) -> int:
         print(f"error: cannot read state: {e}", file=sys.stderr)
         return 1
 
-    # Slug is the branch name minus the 'sindri/' prefix.
+    # Slug is the branch name minus the 'sindri/' prefix. Sanitize it: a
+    # tampered sindri.md could carry a branch like "sindri/../../etc/whatever"
+    # and we must not let shutil.move follow that out of .sindri/archive/.
     branch = state.branch
-    slug = branch[len("sindri/"):] if branch.startswith("sindri/") else branch
+    raw_slug = branch[len("sindri/"):] if branch.startswith("sindri/") else branch
+    slug = raw_slug.replace("/", "-").replace("\\", "-")
+    if slug in {"", ".", ".."} or slug.startswith("."):
+        print(
+            f"error: refusing to archive with unsafe slug {raw_slug!r}",
+            file=sys.stderr,
+        )
+        return 1
     archive_name = f"{date.today().isoformat()}-{slug}"
     archive_dir = Path(".sindri") / "archive" / archive_name
     archive_dir.parent.mkdir(parents=True, exist_ok=True)
