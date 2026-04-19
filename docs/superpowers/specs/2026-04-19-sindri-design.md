@@ -34,7 +34,7 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 ### 3.1 Goals (v1)
 
 1. **Target-driven bounded loop.** User states a goal + target. Loop terminates when target is hit, pool is exhausted, or a guardrail fires.
-2. **Domain-agnostic.** Any metric the user can measure with a shell script is a valid goal. Bundle size, test time, CI latency, model loss — all the same to sindri.
+2. **Domain-agnostic.** Any metric the user can measure with a Python script is a valid goal. Bundle size, test time, CI latency, model loss — all the same to sindri.
 3. **Clean-context experiments.** Every candidate is evaluated by a fresh subagent with no memory of prior experiments. No context bleed, no bias from earlier failures.
 4. **Trustworthy keep/revert decisions.** A kept change is always a confident, above-noise improvement. Never a lucky single run.
 5. **Multi-step benchmarks supported out of the box.** The user can measure GitHub Actions latency, staging-environment metrics, or anything else that requires orchestration — sindri invokes their script and reads the final `METRIC` line.
@@ -46,7 +46,7 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 ### 3.2 Explicit non-goals (v1)
 
 - **Optimizing model behavior.** Sindri trusts Claude to make reasonable edits. It does not benchmark Claude itself.
-- **Benchmark authoring beyond scaffolding help.** Users who need exotic benchmarks (multi-cluster performance aggregation, proprietary observability pipelines) write their own `benchmark.sh`. Sindri does not bundle a library of benchmark templates.
+- **Benchmark authoring beyond scaffolding help.** Users who need exotic benchmarks (multi-cluster performance aggregation, proprietary observability pipelines) write their own `benchmark.py`. Sindri does not bundle a library of benchmark templates.
 - **Branch splitting into multiple PRs.** One run = one branch = one PR. File-disjoint grouping across commits is out of scope.
 - **Concurrent runs in the same repo.** Explicitly single-session, single-active-run.
 - **Cross-platform exotica.** Linux/macOS with POSIX git ≥ 2.30 and the `gh` CLI is the supported environment. Windows not a v1 target.
@@ -57,14 +57,14 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 
 ### 4.1 Primary persona
 
-**The architect-developer.** Someone who thinks in systems and directs AI to implement, who cares about PR-review discipline and branch hygiene, and who runs sindri against real projects (Kubernetes Helm charts, TypeScript monorepos, Terraform modules, ML training code). They write the `benchmark.sh` themselves (or have Claude help) and hand off the rest.
+**The architect-developer.** Someone who thinks in systems and directs AI to implement, who cares about PR-review discipline and branch hygiene, and who runs sindri against real projects (Kubernetes Helm charts, TypeScript monorepos, Terraform modules, ML training code). They write the `benchmark.py` themselves (or have Claude help) and hand off the rest.
 
 ### 4.2 Primary workflow
 
 1. User has an optimization target in mind. They already know what they want to measure.
-2. (Optional) User has a separate conversation with Claude to draft or refine `benchmark.sh`. Sindri does not require this conversation — it's just a way to use Claude for script-writing outside the loop.
+2. (Optional) User has a separate conversation with Claude to draft or refine `benchmark.py`. Sindri does not require this conversation — it's just a way to use Claude for script-writing outside the loop.
 3. User invokes `/sindri <goal>` in the project repo.
-4. Sindri validates or scaffolds `benchmark.sh`, scans the repo, drafts ~10–30 candidates, presents them.
+4. Sindri validates or scaffolds `benchmark.py`, scans the repo, drafts ~10–30 candidates, presents them.
 5. User approves / edits / strikes from the pool (≤1 minute).
 6. Sindri runs a baseline, establishes noise floor, starts the autonomous loop.
 7. User walks away.
@@ -76,7 +76,7 @@ Sindri adapts that generalized pattern to **Claude Code**, respecting three diff
 | # | Moment | Action |
 |---|---|---|
 | 1 | Goal statement | Types `/sindri <goal>` |
-| 2 | Benchmark scaffolding (only if `benchmark.sh` missing) | Confirms/refines sindri's proposed benchmark in natural language |
+| 2 | Benchmark scaffolding (only if `benchmark.py` missing) | Confirms/refines sindri's proposed benchmark in natural language |
 | 3 | Pool approval | Strikes/edits/accepts the drafted candidate list |
 | 4 | (Walks away) | — |
 | 5 | Review PR | `gh pr view` or browser |
@@ -169,7 +169,7 @@ The only user-facing entry point. Subcommands:
 | `/sindri <goal statement>` | Start a new run, or resume if `.sindri/current/` exists. |
 | `/sindri status` | Print current run summary: experiments run, kept, reverted, target delta, confidence, ETA, current candidate. Zero-cost read from state files. |
 | `/sindri stop` | Graceful halt. Orchestrator finishes the in-flight experiment, cancels its `ScheduleWakeup`, writes terminated sentinel to `sindri.jsonl`. Does not auto-finalize. |
-| `/sindri scaffold-benchmark` | Standalone invocation of the scaffolder, useful for regenerating or tweaking `benchmark.sh` outside a live run. |
+| `/sindri scaffold-benchmark` | Standalone invocation of the scaffolder, useful for regenerating or tweaking `benchmark.py` outside a live run. |
 | `/sindri clear` | Destructive: deletes `.sindri/current/`, deletes the local `sindri/<goal-slug>` branch. Prompts for confirmation. |
 
 ### 6.2 Skill: `sindri-start`
@@ -180,7 +180,7 @@ Interactive, one-shot scaffolding for a new run.
 
 **Behavior:**
 1. Parse goal → `{metric_name, direction ∈ {reduce,increase}, target_pct}`. Reject malformed goals with examples.
-2. Check `.claude/scripts/sindri/benchmark.sh`. If missing, invoke `sindri-scaffold-benchmark` as a sub-flow; do not proceed until it exists.
+2. Check `.claude/scripts/sindri/benchmark.py`. If missing, invoke `sindri-scaffold-benchmark` as a sub-flow; do not proceed until it exists.
 3. Validate benchmark: run it once, parse `METRIC <name>=<number>` from the last output line, ensure `<name>` matches `metric_name` from goal.
 4. Scan repo for candidates: read `package.json`, build configs, framework specifics, detect known optimization patterns. Draft a pool of 10–30 candidates with rough expected impact.
 5. Write `.sindri/current/sindri.md` with goal/target/pool (status: `pending`)/baseline: `TBD`.
@@ -192,17 +192,17 @@ Interactive, one-shot scaffolding for a new run.
 
 ### 6.3 Skill: `sindri-scaffold-benchmark`
 
-Conversational helper that writes `benchmark.sh` — without ever asking the user for shell syntax.
+Conversational helper that writes `benchmark.py` — without ever asking the user for Python or shell syntax.
 
 **Behavior:**
 1. Scan repo: detect build tooling (vite/webpack/next/tsc/esbuild/rollup/hardhat/cargo/maven/etc.), lockfile → package manager (`pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`), output directory (`dist/`/`build/`/`out/`/`.next/`), existing CI scripts, relevant binaries (`gh` if GHA, `aws`/`gcloud` if cloud).
-2. Propose a benchmark command based on evidence + goal's metric name. Example: *"I see this is a Vite + pnpm project with output in `dist/`. Proposed benchmark: `pnpm build && du -sb dist | awk '{print $1}'` → outputs `METRIC bundle_bytes=<number>`."*
-3. Accept refinements in natural language ("use npm not pnpm", "measure gzipped", "skip the build"). Translate to shell. Iterate until the user accepts.
-4. Optionally propose `checks.sh` (tests/lint gate). User can skip.
-5. Write the final `benchmark.sh` with proper shebang, `set -euo pipefail`, guard rails, and the `echo "METRIC name=$VAR"` line.
+2. Propose a measurement approach based on evidence + goal's metric name. Example: *"I see this is a Vite + pnpm project with output in `dist/`. Proposed benchmark: run `pnpm build`, then measure byte size of `dist/`. Outputs: `METRIC bundle_bytes=<number>`."*
+3. Accept refinements in natural language ("use npm not pnpm", "measure gzipped", "skip the build"). Translate the user's intent into Python code. Iterate until the user accepts.
+4. Optionally propose `checks.py` (tests/lint gate). User can skip.
+5. Write the final `benchmark.py` as an executable Python script — proper shebang (`#!/usr/bin/env python3`), docstring, `subprocess` calls for external commands, clear `if __name__ == "__main__"` block, and a final `print(f"METRIC name={value}")` line.
 6. Run it once. If it fails or doesn't emit a valid `METRIC` line, surface the error and iterate.
 
-**Fallback for unscoped measurements:** if sindri cannot infer (exotic stacks, multi-cluster performance, proprietary observability), ask in natural language ("describe how you'd measure this") and reason about the answer. Never demand shell.
+**Fallback for unscoped measurements:** if sindri cannot infer (exotic stacks, multi-cluster performance, proprietary observability), ask in natural language ("describe how you'd measure this") and reason about the answer. Never demand code from the user.
 
 **Multi-step benchmarks** (GHA latency, staging deploys, polling external APIs) are in scope — the scaffolder knows patterns for `gh workflow run`, polling loops, and simple aggregation. For very exotic cases the scaffolder hands off: "this is beyond what I can generate; here's a starter template, customize as needed."
 
@@ -258,8 +258,8 @@ Shipped as `prompts/experiment-subagent.md` within the plugin. Loaded by the orc
     "expected_impact_pct": -10,
     "affects": ["package.json", "src/utils/date.ts", "src/components/*"]
   },
-  "benchmark_cmd": ".claude/scripts/sindri/benchmark.sh",
-  "checks_cmd": ".claude/scripts/sindri/checks.sh",
+  "benchmark_cmd": ".claude/scripts/sindri/benchmark.py",
+  "checks_cmd": ".claude/scripts/sindri/checks.py",
   "metric": {"name": "bundle_bytes", "direction": "reduce"},
   "current_best": 720000,
   "noise_floor": 870,
@@ -307,7 +307,7 @@ Runtime dependency: `pydantic>=2.0,<3.0`. Nothing else beyond stdlib.
 
 ```
 python -m sindri init --goal "<str>"                 # sindri-start entry
-python -m sindri validate-benchmark                  # runs benchmark.sh, checks METRIC output
+python -m sindri validate-benchmark                  # runs benchmark.py, checks METRIC output
 python -m sindri detect-mode                         # returns "local" | "remote"
 python -m sindri read-state                          # returns current state as JSON
 python -m sindri pick-next                           # picks next candidate, returns JSON
@@ -328,14 +328,14 @@ User: /sindri reduce bundle_bytes by 15%
 Skill:
   parse goal → {metric: bundle_bytes, direction: reduce, target_pct: 15}
 
-  check .claude/scripts/sindri/benchmark.sh
+  check .claude/scripts/sindri/benchmark.py
     ├ EXISTS → validate it outputs METRIC bundle_bytes=... → ✓
     └ MISSING → invoke sindri-scaffold-benchmark
         ├ scan repo (package.json, lockfile, build tool, output dir)
         ├ PROPOSE "pnpm build && du -sb dist | awk '{print $1}'"
         ├ user refines in NL until accepting
-        ├ generate .claude/scripts/sindri/benchmark.sh
-        ├ optionally scaffold checks.sh
+        ├ generate .claude/scripts/sindri/benchmark.py
+        ├ optionally scaffold checks.py
         └ run once; verify METRIC line
 
   scan repo → draft 10–30 candidates ordered by expected impact
@@ -347,7 +347,7 @@ Skill:
 
   git checkout -b sindri/reduce-bundle-size-15pct
 
-  run benchmark.sh 3× → compute noise_floor = std_dev (runs 2,3; discard run 1)
+  run benchmark.py 3× → compute noise_floor = std_dev (runs 2,3; discard run 1)
 
   write baseline + noise_floor to sindri.md
 
@@ -461,8 +461,8 @@ sindri-finalize (called by orchestrator):
 ├── .claude/
 │   └── scripts/
 │       └── sindri/
-│           ├── benchmark.sh         # committed, team-shared
-│           └── checks.sh            # committed, team-shared (optional)
+│           ├── benchmark.py         # committed, team-shared
+│           └── checks.py            # committed, team-shared (optional)
 ├── .sindri/                         # GITIGNORED (crucial)
 │   ├── current/                     # singleton — only one active run
 │   │   ├── sindri.md                # human-readable live doc
@@ -666,7 +666,7 @@ def append_jsonl(record: JsonlRecord, path: Path = Path(".sindri/current/sindri.
 | **Individual experiment — check_failed** | Candidate broke tests | revert, no retry | no |
 | **Individual experiment — errored** | Benchmark crashed after candidate applied | revert, retry once, then mark dead | no |
 | **Individual experiment — timeout** | Subagent exceeded wall clock | revert, move on | no unless 3 in a row |
-| **Structural — benchmark fails at baseline** | `benchmark.sh` exits non-zero on initial run | halt | **yes** |
+| **Structural — benchmark fails at baseline** | `benchmark.py` exits non-zero on initial run | halt | **yes** |
 | **Structural — metric unparseable** | Script doesn't emit a `METRIC` line | halt | **yes** |
 | **Structural — 3 consecutive timeouts** | Something hangs the system | halt | **yes** |
 | **Structural — `max_reverts_in_a_row`** | 7 reverts back-to-back = pool or benchmark is wrong | halt | **yes** |
@@ -710,7 +710,7 @@ def append_jsonl(record: JsonlRecord, path: Path = Path(".sindri/current/sindri.
 | **2. Unit (I/O)** | pytest + `tmp_path` | State round-trip, jsonl append atomicity, recovery from corrupt input, resumption after interrupt |
 | **3. Git ops** | pytest + real git in `tmp_path` repos | Branch creation, commit with metric delta in message, `reset --hard`, safe delete |
 | **4. CLI integration** | pytest + subprocess | `python -m sindri <cmd>` produces expected JSON given fixture state |
-| **5. E2E orchestrator** | pytest + fake `benchmark.sh` + stub subagent | Full loop on a fixture repo: N kept commits, right jsonl entries, correct termination |
+| **5. E2E orchestrator** | pytest + fake `benchmark.py` + stub subagent | Full loop on a fixture repo: N kept commits, right jsonl entries, correct termination |
 | **6. Smoke** | shell script | `./scripts/smoke.sh` installs plugin locally, runs throwaway goal, validates end-to-end |
 
 ### 11.3 Specific test cases worth naming now
@@ -753,7 +753,7 @@ def append_jsonl(record: JsonlRecord, path: Path = Path(".sindri/current/sindri.
 - `push_with_upstream` fails cleanly without remote
 
 **E2E:**
-- Fixture repo with a deterministic fake benchmark (`echo "METRIC lines=$(wc -l src/*.py)"`)
+- Fixture repo with a deterministic fake `benchmark.py` that counts lines across the source tree and emits `print(f"METRIC lines={total}")`
 - Fake pool: 3 candidates that reduce lines, 2 that don't, 1 that errors
 - Stub subagent returns predetermined JSON per candidate name
 - Assert: after full run, branch has 3 commits, jsonl has 6 experiment records + 1 baseline_complete + 1 terminated, final metric matches expected
