@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>sindri — live architecture walkthrough (v2: single-PR finalize)</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #141922;
+    --panel2: #1a2130;
+    --border: #2a3142;
+    --text: #e6ecf4;
+    --muted: #7d8aa0;
+    --accent: #70a8ff;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --purple: #c084fc;
+    --cyan: #67e8f9;
+    --mono: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .title { font-size: 22px; font-weight: 600; }
+  .goal { font-family: var(--mono); color: var(--accent); font-size: 13px; margin-top: 4px; }
+  .version-tag { display: inline-block; background: var(--green); color: var(--bg); font-size: 10px; padding: 2px 8px; border-radius: 10px; font-family: var(--mono); margin-left: 8px; vertical-align: middle; }
+  .controls { display: flex; align-items: center; gap: 8px; }
+  .btn { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; }
+  .btn:hover { background: var(--panel2); }
+  .btn.primary { background: var(--accent); color: #0e1116; border-color: var(--accent); font-weight: 600; }
+  .speed { display: flex; gap: 4px; }
+  .speed .btn { padding: 6px 10px; font-size: 12px; }
+  .speed .btn.active { background: var(--accent); color: #0e1116; }
+
+  .phase-bar { display: flex; gap: 8px; margin-bottom: 20px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .phase-bar .phase { padding: 8px 14px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); flex: 1; text-align: center; transition: all 0.3s; }
+  .phase-bar .phase.active { background: var(--accent); color: #0e1116; border-color: var(--accent); font-weight: 600; }
+  .phase-bar .phase.done { background: var(--panel2); color: var(--green); border-color: var(--green); }
+
+  .layout { display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .card h3 { margin: 0 0 14px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
+
+  .arch { position: relative; min-height: 520px; }
+  .node { position: absolute; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; background: var(--panel2); transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1); font-size: 12px; }
+  .node.active { border-color: var(--accent); background: rgba(112, 168, 255, 0.12); box-shadow: 0 0 0 3px rgba(112, 168, 255, 0.15); transform: translateZ(0) scale(1.03); }
+  .node .node-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  .node .node-sub { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+
+  .node.user        { top: 10px;  left: 10px;  width: 150px; }
+  .node.skill-start { top: 10px;  left: 200px; width: 180px; }
+  .node.skill-loop  { top: 10px;  left: 410px; width: 200px; }
+  .node.skill-final { top: 10px;  right: 10px; width: 180px; }
+
+  .node.state-md    { top: 180px; left: 10px; width: 180px; }
+  .node.state-jsonl { top: 260px; left: 10px; width: 180px; }
+  .node.state-sh    { top: 340px; left: 10px; width: 180px; }
+
+  .node.orchestrator { top: 175px; left: 225px; width: 220px; padding: 14px; }
+  .node.orchestrator .node-sub { margin-top: 6px; line-height: 1.5; }
+
+  .node.subagent { top: 175px; right: 10px; width: 210px; padding: 14px; border-style: dashed; }
+  .node.subagent.idle { opacity: 0.35; }
+  .node.subagent.active { opacity: 1; border-style: solid; }
+
+  .node.git { top: 400px; left: 225px; width: 220px; padding: 12px; }
+  .node.git .commits { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 110px; overflow: hidden; }
+  .node.git .commit { font-family: var(--mono); font-size: 10px; padding: 3px 6px; border-radius: 3px; background: rgba(74, 222, 128, 0.1); color: var(--green); border-left: 2px solid var(--green); opacity: 0; animation: slideIn 0.4s forwards; }
+  .node.git .commit.reverted { background: rgba(248, 113, 113, 0.1); color: var(--red); border-left-color: var(--red); text-decoration: line-through; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+  .node.pr { top: 400px; right: 10px; width: 210px; padding: 12px; opacity: 0.35; }
+  .node.pr.active { opacity: 1; border-color: var(--green); }
+  .node.pr .pr-body {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--green);
+    line-height: 1.6;
+    opacity: 0;
+  }
+  .node.pr.active .pr-body { animation: slideIn 0.5s 0.2s forwards; }
+  .node.pr .pr-link { color: var(--accent); text-decoration: underline; margin-top: 6px; display: block; }
+
+  .arrows { position: absolute; inset: 0; pointer-events: none; width: 100%; height: 100%; }
+  .arrow-line { stroke: var(--border); stroke-width: 1.5; fill: none; }
+  .arrow-line.active { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; animation: dash 1s linear infinite; }
+  .arrow-line.data { stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 4 4; animation: dash 0.8s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -20; } }
+
+  .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+  .stat .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+  .stat .stat-value { font-family: var(--mono); font-size: 18px; font-weight: 600; }
+  .stat .stat-delta { font-size: 11px; font-family: var(--mono); margin-top: 2px; }
+  .stat .stat-delta.pos { color: var(--green); }
+  .stat .stat-delta.neg { color: var(--red); }
+
+  .progress-wrap { margin-bottom: 16px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; font-family: var(--mono); }
+  .progress-bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--green)); width: 0%; transition: width 0.6s ease; }
+
+  .current-exp { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 14px; font-family: var(--mono); font-size: 12px; }
+  .current-exp .exp-label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .current-exp .exp-name { color: var(--text); margin-bottom: 8px; font-size: 13px; }
+  .current-exp .exp-meta { display: flex; gap: 16px; color: var(--muted); font-size: 11px; flex-wrap: wrap; }
+  .current-exp .exp-meta span b { color: var(--accent); font-weight: normal; }
+  .current-exp.idle .exp-name { color: var(--muted); font-style: italic; }
+
+  .jsonl-panel { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; height: 240px; overflow: hidden; position: relative; }
+  .jsonl-panel h4 { margin: 0 0 8px 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  .jsonl-lines { font-family: var(--mono); font-size: 10.5px; line-height: 1.6; }
+  .jsonl-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; opacity: 0; animation: slideIn 0.4s forwards; }
+  .jsonl-line.kept { color: var(--green); }
+  .jsonl-line.reverted { color: var(--red); }
+  .jsonl-line.baseline { color: var(--yellow); }
+  .jsonl-line.event { color: var(--purple); font-weight: 600; }
+
+  .pool-panel { margin-top: 14px; }
+  .pool-panel h4 { margin: 0 0 6px 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  .pool-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .pool-cell { aspect-ratio: 1; border-radius: 3px; background: var(--panel2); border: 1px solid var(--border); transition: all 0.4s; }
+  .pool-cell.active { background: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+  .pool-cell.kept { background: var(--green); border-color: var(--green); }
+  .pool-cell.reverted { background: var(--red); border-color: var(--red); opacity: 0.5; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(112, 168, 255, 0.5); } 50% { box-shadow: 0 0 0 4px rgba(112, 168, 255, 0); } }
+
+  .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 10px; color: var(--muted); flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+  .final-summary { background: linear-gradient(135deg, rgba(74, 222, 128, 0.1), rgba(103, 232, 249, 0.1)); border: 1px solid var(--green); border-radius: 8px; padding: 14px; margin-top: 14px; font-family: var(--mono); font-size: 12px; display: none; }
+  .final-summary.show { display: block; animation: slideIn 0.6s forwards; }
+  .final-summary h4 { margin: 0 0 8px 0; color: var(--green); font-size: 12px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="title">sindri — live architecture walkthrough <span class="version-tag">v2: single-PR finalize</span></div>
+    <div class="goal">/sindri reduce bundle_bytes by 15%</div>
+  </div>
+  <div class="controls">
+    <div class="speed">
+      <button class="btn" data-speed="0.5">0.5×</button>
+      <button class="btn active" data-speed="1">1×</button>
+      <button class="btn" data-speed="2">2×</button>
+      <button class="btn" data-speed="4">4×</button>
+    </div>
+    <button class="btn" id="resetBtn">↺ Reset</button>
+    <button class="btn primary" id="playBtn">▶ Play</button>
+  </div>
+</div>
+
+<div class="phase-bar">
+  <div class="phase" data-phase="init">1. Init (sindri-start)</div>
+  <div class="phase" data-phase="loop">2. Loop (orchestrator × subagents)</div>
+  <div class="phase" data-phase="terminate">3. Terminate</div>
+  <div class="phase" data-phase="finalize">4. Finalize (push + single PR)</div>
+</div>
+
+<div class="layout">
+
+  <div class="card">
+    <h3>Architecture — data flows live</h3>
+    <div class="arch" id="arch">
+      <svg class="arrows" id="arrows"></svg>
+
+      <div class="node user" id="n-user">
+        <div class="node-title">👤 User</div>
+        <div class="node-sub">/sindri &lt;goal&gt;</div>
+      </div>
+      <div class="node skill-start" id="n-start">
+        <div class="node-title">🛠 sindri-start</div>
+        <div class="node-sub">scaffold + approve</div>
+      </div>
+      <div class="node skill-loop" id="n-loop">
+        <div class="node-title">🔁 sindri-loop (orchestrator)</div>
+        <div class="node-sub">picks → dispatches → decides</div>
+      </div>
+      <div class="node skill-final" id="n-final">
+        <div class="node-title">📦 sindri-finalize</div>
+        <div class="node-sub">push + gh pr create</div>
+      </div>
+
+      <div class="node state-md" id="n-md">
+        <div class="node-title">📄 sindri.md</div>
+        <div class="node-sub">goal, pool, status</div>
+      </div>
+      <div class="node state-jsonl" id="n-jsonl">
+        <div class="node-title">📝 sindri.jsonl</div>
+        <div class="node-sub">append-only log</div>
+      </div>
+      <div class="node state-sh" id="n-sh">
+        <div class="node-title">⚙ sindri.sh</div>
+        <div class="node-sub">benchmark script</div>
+      </div>
+
+      <div class="node orchestrator" id="n-orch">
+        <div class="node-title">🔁 orchestrator (per-wakeup)</div>
+        <div class="node-sub">
+          reads state → picks candidate<br>
+          dispatches Task subagent →<br>
+          commits kept / resets rejected<br>
+          ScheduleWakeup(60s) until done
+        </div>
+      </div>
+
+      <div class="node subagent idle" id="n-sub">
+        <div class="node-title">🧪 experiment subagent</div>
+        <div class="node-sub">fresh context per experiment</div>
+      </div>
+
+      <div class="node git" id="n-git">
+        <div class="node-title">🌿 sindri/reduce-bundle-size-15pct</div>
+        <div class="commits" id="commits"></div>
+      </div>
+
+      <div class="node pr" id="n-pr">
+        <div class="node-title">🔀 Pull request</div>
+        <div class="pr-body" id="pr-body"></div>
+      </div>
+
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background: var(--accent);"></div>active component</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--cyan);"></div>data flow</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--green);"></div>kept commit</div>
+      <div class="legend-item"><div class="legend-dot" style="background: var(--red);"></div>reverted</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Live state</h3>
+
+    <div class="stats-row">
+      <div class="stat">
+        <div class="stat-label">Current bundle</div>
+        <div class="stat-value" id="current-metric">— KB</div>
+        <div class="stat-delta" id="current-delta">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Experiments</div>
+        <div class="stat-value" id="exp-counter">0 / 0</div>
+        <div class="stat-delta" id="exp-breakdown" style="color: var(--muted);">0 kept · 0 reverted</div>
+      </div>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span>Progress toward target</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    </div>
+
+    <div class="current-exp idle" id="current-exp">
+      <div class="exp-label">Current experiment</div>
+      <div class="exp-name" id="exp-name">(waiting)</div>
+      <div class="exp-meta" id="exp-meta"></div>
+    </div>
+
+    <div class="jsonl-panel">
+      <h4>sindri.jsonl (tail)</h4>
+      <div class="jsonl-lines" id="jsonl"></div>
+    </div>
+
+    <div class="pool-panel">
+      <h4>Candidate pool (30)</h4>
+      <div class="pool-grid" id="pool"></div>
+    </div>
+
+    <div class="final-summary" id="summary">
+      <h4>✓ Done — PR opened</h4>
+      <div id="summary-body"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BASELINE = 842;
+const TARGET_PCT = 15;
+const TARGET_VALUE = BASELINE * (1 - TARGET_PCT / 100);
+
+const POOL = [
+  { name: 'Replace moment with date-fns',    impact: -82, keep: true },
+  { name: 'Tree-shake lodash imports',       impact: -41, keep: true },
+  { name: 'Dynamic import heavy routes',     impact: -118, keep: true },
+  { name: 'Remove unused polyfills',         impact: +3,  keep: false },
+  { name: 'Swap webpack for vite',           impact: -34, keep: true },
+  { name: 'Inline small SVGs',               impact: -2,  keep: false },
+  { name: 'Terser compression tuning',       impact: -19, keep: true },
+  { name: 'Remove source maps from prod',    impact: -12, keep: true },
+  ...Array.from({ length: 22 }, (_, i) => ({ name: `Candidate ${i+9}`, impact: 0, keep: false })),
+];
+
+const speeds = { 0.5: 2000, 1: 1000, 2: 500, 4: 250 };
+let speedMultiplier = 1;
+let playing = false;
+let timer = null;
+let step = 0;
+let current = BASELINE;
+let kept = 0, reverted = 0;
+let experimentIdx = 0;
+
+const expMetaFor = (rep, conf, status) => `<span>reps: <b>${rep}/10</b></span><span>confidence: <b>${conf.toFixed(1)}×</b></span><span>status: <b>${status}</b></span>`;
+
+function setPhase(name) { document.querySelectorAll('.phase-bar .phase').forEach(p => p.classList.toggle('active', p.dataset.phase === name)); }
+function markPhaseDone(name) { const el = document.querySelector(`.phase-bar .phase[data-phase="${name}"]`); el.classList.remove('active'); el.classList.add('done'); }
+function activate(ids) { document.querySelectorAll('.node').forEach(n => n.classList.remove('active')); ids.forEach(id => document.getElementById(id)?.classList.add('active')); }
+function subActive(on) { const s = document.getElementById('n-sub'); s.classList.toggle('active', on); s.classList.toggle('idle', !on); }
+function setCurrentMetric(v) {
+  current = v;
+  document.getElementById('current-metric').textContent = `${v.toFixed(0)} KB`;
+  const pct = ((BASELINE - v) / BASELINE * 100);
+  const delta = document.getElementById('current-delta');
+  if (pct > 0) { delta.textContent = `−${pct.toFixed(1)}%`; delta.className = 'stat-delta pos'; }
+  else if (pct < 0) { delta.textContent = `+${(-pct).toFixed(1)}%`; delta.className = 'stat-delta neg'; }
+  else { delta.textContent = 'baseline'; delta.className = 'stat-delta'; delta.style.color = 'var(--muted)'; }
+  const progressPct = Math.min(100, (pct / TARGET_PCT) * 100);
+  document.getElementById('progress-fill').style.width = `${progressPct}%`;
+  document.getElementById('progress-pct').textContent = `${progressPct.toFixed(0)}%`;
+}
+function appendJsonl(obj, cls) {
+  const container = document.getElementById('jsonl');
+  const line = document.createElement('div');
+  line.className = `jsonl-line ${cls || ''}`;
+  line.textContent = JSON.stringify(obj);
+  container.appendChild(line);
+  while (container.children.length > 10) container.removeChild(container.firstChild);
+}
+function setExp(name, metaHtml, idleCls) {
+  const el = document.getElementById('current-exp');
+  el.classList.toggle('idle', !!idleCls);
+  document.getElementById('exp-name').textContent = name;
+  document.getElementById('exp-meta').innerHTML = metaHtml || '';
+}
+function updateExpCounter() {
+  document.getElementById('exp-counter').textContent = `${experimentIdx} / ${POOL.length}`;
+  document.getElementById('exp-breakdown').textContent = `${kept} kept · ${reverted} reverted`;
+}
+function addCommit(label, revertedFlag) {
+  const container = document.getElementById('commits');
+  const c = document.createElement('div');
+  c.className = `commit ${revertedFlag ? 'reverted' : ''}`;
+  c.textContent = label;
+  container.appendChild(c);
+  while (container.children.length > 6) container.removeChild(container.firstChild);
+}
+function drawArrow(fromId, toId, cls, curve) {
+  const svg = document.getElementById('arrows');
+  const a = document.getElementById(fromId).getBoundingClientRect();
+  const b = document.getElementById(toId).getBoundingClientRect();
+  const arch = document.getElementById('arch').getBoundingClientRect();
+  const x1 = a.left + a.width/2 - arch.left, y1 = a.top + a.height/2 - arch.top;
+  const x2 = b.left + b.width/2 - arch.left, y2 = b.top + b.height/2 - arch.top;
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 + (curve || 0);
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', `M${x1},${y1} Q${mx},${my} ${x2},${y2}`);
+  path.setAttribute('class', `arrow-line ${cls || ''}`);
+  svg.appendChild(path);
+}
+function clearArrows() {
+  const svg = document.getElementById('arrows');
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  drawStaticArrows();
+}
+function drawStaticArrows() {
+  drawArrow('n-user', 'n-start');
+  drawArrow('n-start', 'n-md');
+  drawArrow('n-start', 'n-sh');
+  drawArrow('n-md', 'n-orch');
+  drawArrow('n-jsonl', 'n-orch');
+  drawArrow('n-orch', 'n-sub');
+  drawArrow('n-orch', 'n-git');
+  drawArrow('n-orch', 'n-jsonl');
+  drawArrow('n-git', 'n-final');
+  drawArrow('n-final', 'n-pr');
+}
+function renderPool() {
+  const pool = document.getElementById('pool');
+  pool.innerHTML = '';
+  POOL.forEach((_, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'pool-cell';
+    cell.id = `pool-${i}`;
+    pool.appendChild(cell);
+  });
+}
+
+const steps = [
+  // INIT
+  () => { setPhase('init'); activate(['n-user']); return 1; },
+  () => { activate(['n-user','n-start']); clearArrows(); drawArrow('n-user', 'n-start', 'active'); return 1; },
+  () => { setExp('Scanning repo for build config, deps…', '', true); return 1.2; },
+  () => { setExp('Drafting 30 candidate optimizations…', '', true); return 1.2; },
+  () => { activate(['n-start','n-md','n-sh']); clearArrows(); drawArrow('n-start','n-md','data'); drawArrow('n-start','n-sh','data'); appendJsonl({ event: 'pool_drafted', candidates: 30 }, 'event'); return 1; },
+  () => { setExp('Waiting for user approval of pool…', '', true); return 1.2; },
+  () => { appendJsonl({ event: 'pool_approved' }, 'event'); return 0.6; },
+  () => { activate(['n-start','n-sh']); setExp('Running baseline 3× to measure noise floor…', '', true); return 1; },
+  () => { setCurrentMetric(842); appendJsonl({ id: 0, run: 'baseline-1', value: 843.1 }, 'baseline'); return 0.7; },
+  () => { appendJsonl({ id: 0, run: 'baseline-2', value: 841.4 }, 'baseline'); return 0.7; },
+  () => { appendJsonl({ id: 0, run: 'baseline-3', value: 842.5 }, 'baseline'); return 0.7; },
+  () => { appendJsonl({ event: 'baseline_set', value: 842, noise_floor: 0.87 }, 'event'); markPhaseDone('init'); return 0.8; },
+
+  // LOOP
+  () => { setPhase('loop'); return 0.4; },
+  ...POOL.slice(0, 8).flatMap((exp, i) => [
+    () => { experimentIdx = i + 1; updateExpCounter(); activate(['n-orch']); clearArrows(); drawArrow('n-md','n-orch','active'); drawArrow('n-jsonl','n-orch','active'); setExp(exp.name, `<span>picking candidate ${i+1}/30…</span>`, false); document.getElementById(`pool-${i}`).classList.add('active'); return 0.8; },
+    () => { activate(['n-orch','n-sub']); subActive(true); clearArrows(); drawArrow('n-orch','n-sub','data'); setExp(exp.name, `<span>dispatched subagent — fresh context</span>`, false); return 0.8; },
+    () => { subActive(true); setExp(exp.name, expMetaFor(1, 0, 'benchmarking'), false); return 0.6; },
+    () => {
+      const projected = current + exp.impact;
+      const confidence = Math.abs(exp.impact) / 0.87;
+      if (exp.keep) {
+        setCurrentMetric(projected);
+        kept++; updateExpCounter();
+        setExp(exp.name, expMetaFor(3, confidence, 'KEPT'), false);
+        appendJsonl({ id: i+1, candidate: exp.name, delta: exp.impact, confidence: +confidence.toFixed(1), status: 'kept' }, 'kept');
+        document.getElementById(`pool-${i}`).classList.remove('active');
+        document.getElementById(`pool-${i}`).classList.add('kept');
+        addCommit(`kept: ${exp.name.substring(0,24)}… (${exp.impact} KB)`, false);
+        clearArrows();
+        drawArrow('n-sub','n-orch','data'); drawArrow('n-orch','n-git','data'); drawArrow('n-orch','n-jsonl','data');
+      } else {
+        reverted++; updateExpCounter();
+        setExp(exp.name, expMetaFor(3, confidence, 'REVERTED'), false);
+        appendJsonl({ id: i+1, candidate: exp.name, delta: exp.impact, confidence: +confidence.toFixed(1), status: 'reverted' }, 'reverted');
+        document.getElementById(`pool-${i}`).classList.remove('active');
+        document.getElementById(`pool-${i}`).classList.add('reverted');
+        addCommit(`reverted: ${exp.name.substring(0,20)}…`, true);
+        clearArrows();
+        drawArrow('n-sub','n-orch','data');
+      }
+      subActive(false);
+      return 1;
+    },
+  ]),
+
+  // TERMINATE
+  () => {
+    setPhase('terminate'); markPhaseDone('loop');
+    activate(['n-orch']); clearArrows();
+    appendJsonl({ event:'terminated', reason:'target_hit', final: current.toFixed(0), delta_pct: -((BASELINE-current)/BASELINE*100).toFixed(1) }, 'event');
+    setExp('Target hit. Loop complete.', '<span>writing termination sentinel to sindri.jsonl</span>', false);
+    return 1.2;
+  },
+  () => { markPhaseDone('terminate'); return 0.6; },
+
+  // FINALIZE — SINGLE PR
+  () => {
+    setPhase('finalize');
+    activate(['n-final']);
+    clearArrows();
+    drawArrow('n-jsonl','n-final','data');
+    drawArrow('n-md','n-final','data');
+    setExp('sindri-finalize: reading jsonl + md, composing PR body…', '', false);
+    return 1.2;
+  },
+  () => {
+    activate(['n-final','n-git']);
+    clearArrows();
+    drawArrow('n-git','n-final','active');
+    setExp('git push -u origin sindri/reduce-bundle-size-15pct', '', false);
+    appendJsonl({ event: 'pushed', remote: 'origin', branch: 'sindri/reduce-bundle-size-15pct' }, 'event');
+    return 1;
+  },
+  () => {
+    activate(['n-final','n-pr']);
+    document.getElementById('n-pr').classList.add('active');
+    clearArrows();
+    drawArrow('n-final','n-pr','data');
+    setExp('gh pr create --base main --title "perf: reduce bundle_bytes by 15%"', '', false);
+    document.getElementById('pr-body').innerHTML = `
+      <b>perf: reduce bundle_bytes (−15.2%)</b><br><br>
+      Goal: −15% · Result: <b>−15.2%</b><br>
+      Baseline: 842 KB → Final: 714 KB<br>
+      ${kept} kept commits, ${reverted} reverted<br>
+      <br>
+      <span style="color:var(--muted);">Body includes commit-by-commit<br>delta table + dead-ends section</span>
+      <br><br>
+      <span class="pr-link">→ github.com/.../pull/42</span>
+    `;
+    appendJsonl({ event: 'pr_created', number: 42, url: 'github.com/.../pull/42' }, 'event');
+    return 1.5;
+  },
+  () => {
+    setExp('Done. PR #42 opened against main.', '', true);
+    const s = document.getElementById('summary');
+    s.classList.add('show');
+    document.getElementById('summary-body').innerHTML = `
+      Final: <b>${current.toFixed(0)} KB</b> (from ${BASELINE} KB, −${((BASELINE-current)/BASELINE*100).toFixed(1)}%)<br>
+      Experiments: <b>${experimentIdx} run</b> · ${kept} kept · ${reverted} reverted<br>
+      PR: <b>one branch, ${kept} commits</b> — each carries its delta<br>
+      <span style="color: var(--muted);">22 candidates untouched — exhaustion not required</span>
+    `;
+    markPhaseDone('finalize');
+    return 2;
+  },
+];
+
+function tick() {
+  if (!playing || step >= steps.length) { playing = false; document.getElementById('playBtn').textContent = (step >= steps.length) ? '✓ Done' : '▶ Play'; return; }
+  const unit = steps[step]() || 1;
+  step++;
+  timer = setTimeout(tick, unit * speeds[speedMultiplier]);
+}
+function play() { if (step >= steps.length) return; playing = true; document.getElementById('playBtn').textContent = '❚❚ Pause'; tick(); }
+function pause() { playing = false; clearTimeout(timer); document.getElementById('playBtn').textContent = '▶ Play'; }
+function reset() {
+  pause(); step = 0; current = BASELINE; kept = 0; reverted = 0; experimentIdx = 0;
+  document.getElementById('jsonl').innerHTML = '';
+  document.getElementById('commits').innerHTML = '';
+  document.getElementById('pr-body').innerHTML = '';
+  document.getElementById('summary').classList.remove('show');
+  document.getElementById('n-pr').classList.remove('active');
+  document.querySelectorAll('.phase').forEach(p => p.classList.remove('active','done'));
+  document.querySelectorAll('.pool-cell').forEach(c => c.className = 'pool-cell');
+  subActive(false); activate([]);
+  setCurrentMetric(BASELINE); updateExpCounter();
+  setExp('(waiting)', '', true);
+  clearArrows();
+  document.getElementById('playBtn').textContent = '▶ Play';
+}
+
+window.addEventListener('load', () => {
+  renderPool();
+  setCurrentMetric(BASELINE);
+  updateExpCounter();
+  setExp('Click ▶ Play to run simulation', '', true);
+  drawStaticArrows();
+  document.getElementById('playBtn').onclick = () => playing ? pause() : play();
+  document.getElementById('resetBtn').onclick = reset;
+  document.querySelectorAll('.speed .btn').forEach(b => {
+    b.onclick = () => {
+      document.querySelectorAll('.speed .btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      speedMultiplier = parseFloat(b.dataset.speed);
+    };
+  });
+  window.addEventListener('resize', () => { if (!playing) clearArrows(); });
+});
+</script>
+</body>
+</html>
