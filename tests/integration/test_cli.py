@@ -80,3 +80,40 @@ class TestValidateBenchmark:
         script.chmod(0o755)
         r = _run_cli("validate-benchmark", "--expected", "foo", cwd=tmp_path)
         assert r.returncode != 0
+
+
+class TestDetectMode:
+    def test_local_script(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text("print('METRIC x=42')")
+        payload = json.dumps({"baseline_samples": [500.0, 100.0, 101.0, 99.0]})
+        r = _run_cli("detect-mode", cwd=tmp_path, input=payload)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["mode"] == "local"
+
+    def test_remote_by_keyword(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text(
+            "import subprocess\nsubprocess.run(['gh', 'workflow', 'run'])\nprint('METRIC x=42')"
+        )
+        payload = json.dumps({"baseline_samples": [500.0, 100.0, 101.0, 99.0]})
+        r = _run_cli("detect-mode", cwd=tmp_path, input=payload)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["mode"] == "remote"
+
+    def test_remote_by_cv(self, tmp_path: Path) -> None:
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text("print('METRIC x=42')")
+        payload = json.dumps({"baseline_samples": [500.0, 100.0, 80.0, 120.0, 70.0, 130.0]})
+        r = _run_cli("detect-mode", cwd=tmp_path, input=payload)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["mode"] == "remote"

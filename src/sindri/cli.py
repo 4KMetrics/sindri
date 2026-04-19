@@ -32,6 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="subcommand", required=False)
 
     _add_validate_benchmark(sub)
+    _add_detect_mode(sub)
     return p
 
 
@@ -87,6 +88,45 @@ def _handle_validate_benchmark(args: argparse.Namespace) -> int:
         return 1
 
     print(json.dumps({"ok": True, "metric_name": name, "metric_value": value}))
+    return 0
+
+
+def _add_detect_mode(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "detect-mode",
+        help="auto-detect local vs remote benchmark mode; reads JSON from stdin",
+    )
+    p.add_argument(
+        "--script",
+        default=".claude/scripts/sindri/benchmark.py",
+        help="path to benchmark script",
+    )
+
+
+@_register("detect-mode")
+def _handle_detect_mode(args: argparse.Namespace) -> int:
+    import json
+    from pathlib import Path
+
+    from sindri.core.modes import detect_mode
+
+    try:
+        payload = json.loads(sys.stdin.read())
+        samples = payload["baseline_samples"]
+    except (json.JSONDecodeError, KeyError) as e:
+        print(
+            f"error: malformed stdin (need {{'baseline_samples': [...]}}): {e}",
+            file=sys.stderr,
+        )
+        return 1
+
+    script = Path(args.script)
+    if not script.exists():
+        print(f"error: script not found: {script}", file=sys.stderr)
+        return 1
+
+    mode = detect_mode(script, samples)
+    print(json.dumps({"mode": mode}))
     return 0
 
 
