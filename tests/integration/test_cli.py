@@ -455,3 +455,39 @@ class TestArchive:
     def test_no_current_fails(self, tmp_path: Path) -> None:
         r = _run_cli("archive", cwd=tmp_path)
         assert r.returncode != 0
+
+
+class TestStatus:
+    def test_prints_summary(self, tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="bundle_bytes", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=842000.0, noise_floor=870.0, samples=[843000.0, 841000.0, 842000.0]),
+            pool=[
+                Candidate(id=1, name="a", expected_impact_pct=-10.0, status="kept"),
+                Candidate(id=2, name="b", expected_impact_pct=-5.0, status="pending"),
+            ],
+            branch="sindri/reduce-bundle-bytes-15pct",
+            started_at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+            current_best=760000.0,
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+
+        r = _run_cli("status", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "842" in r.stdout
+        assert "760" in r.stdout
+        assert "reduce" in r.stdout.lower() or "bundle_bytes" in r.stdout.lower()
+        assert "2" in r.stdout

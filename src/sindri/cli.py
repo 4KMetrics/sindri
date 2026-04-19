@@ -39,6 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_check_termination(sub)
     _add_generate_pr_body(sub)
     _add_archive(sub)
+    _add_status(sub)
     return p
 
 
@@ -352,6 +353,46 @@ def _handle_archive(args: argparse.Namespace) -> int:
     shutil.move(str(current), str(archive_dir))
 
     print(json.dumps({"ok": True, "archived_to": str(archive_dir)}))
+    return 0
+
+
+def _add_status(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser("status", help="human-readable summary of current run")
+
+
+@_register("status")
+def _handle_status(args: argparse.Namespace) -> int:
+    from sindri.core.state import StateIOError, read_state
+
+    try:
+        state = read_state()
+    except StateIOError:
+        print("sindri: no active run (.sindri/current/ not found)")
+        return 0
+
+    kept = sum(1 for c in state.pool if c.status == "kept")
+    reverted = sum(1 for c in state.pool if c.status == "reverted")
+    pending = sum(1 for c in state.pool if c.status == "pending")
+    dead = sum(1 for c in state.pool if c.status in {"errored", "check_failed"})
+
+    current = state.current_best if state.current_best is not None else state.baseline.value
+    delta_pct = ((current - state.baseline.value) / state.baseline.value) * 100
+
+    print(
+        f"sindri: {state.goal.direction} {state.goal.metric_name} by "
+        f"{state.goal.target_pct}%"
+    )
+    print(f"  branch:    {state.branch}")
+    print(f"  mode:      {state.mode}")
+    print(
+        f"  baseline:  {state.baseline.value:,.0f} "
+        f"(σ {state.baseline.noise_floor:,.2f})"
+    )
+    print(f"  current:   {current:,.0f} ({delta_pct:+.2f}%)")
+    print(
+        f"  pool:      {len(state.pool)} total · {kept} kept · {reverted} reverted "
+        f"· {dead} dead · {pending} pending"
+    )
     return 0
 
 
