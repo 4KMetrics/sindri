@@ -38,6 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_record_result(sub)
     _add_check_termination(sub)
     _add_generate_pr_body(sub)
+    _add_archive(sub)
     return p
 
 
@@ -312,6 +313,45 @@ def _handle_generate_pr_body(args: argparse.Namespace) -> int:
     state = read_state()
     records = read_jsonl(Path(".sindri/current/sindri.jsonl"))
     print(render_pr_body(state, records))
+    return 0
+
+
+def _add_archive(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "archive",
+        help="move .sindri/current/ to .sindri/archive/<date>-<slug>/",
+    )
+
+
+@_register("archive")
+def _handle_archive(args: argparse.Namespace) -> int:
+    import json
+    import shutil
+    from datetime import date
+    from pathlib import Path
+
+    from sindri.core.state import StateIOError, read_state
+
+    current = Path(".sindri/current")
+    if not current.exists():
+        print("error: .sindri/current/ does not exist", file=sys.stderr)
+        return 1
+
+    try:
+        state = read_state(dir=current)
+    except StateIOError as e:
+        print(f"error: cannot read state: {e}", file=sys.stderr)
+        return 1
+
+    # Slug is the branch name minus the 'sindri/' prefix.
+    branch = state.branch
+    slug = branch[len("sindri/"):] if branch.startswith("sindri/") else branch
+    archive_name = f"{date.today().isoformat()}-{slug}"
+    archive_dir = Path(".sindri") / "archive" / archive_name
+    archive_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(current), str(archive_dir))
+
+    print(json.dumps({"ok": True, "archived_to": str(archive_dir)}))
     return 0
 
 
