@@ -302,3 +302,64 @@ class TestRecordResult:
         self._setup_state_with_pending(tmp_path)
         r = _run_cli("record-result", cwd=tmp_path, input="not json")
         assert r.returncode != 0
+
+
+class TestCheckTermination:
+    def test_not_terminated(self, tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/test",
+            started_at=datetime.now(tz=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+        payload = json.dumps({"experiments_run": 0, "consecutive_reverts": 0})
+        r = _run_cli("check-termination", cwd=tmp_path, input=payload)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["terminated"] is False
+
+    def test_target_hit(self, tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0, status="kept")],
+            branch="sindri/test",
+            started_at=datetime.now(tz=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+            current_best=84.0,
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+        payload = json.dumps({"experiments_run": 1, "consecutive_reverts": 0})
+        r = _run_cli("check-termination", cwd=tmp_path, input=payload)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["terminated"] is True
+        assert data["reason"] == "target_hit"
+        assert data["auto_finalize"] is True

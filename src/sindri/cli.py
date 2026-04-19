@@ -36,6 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_read_state(sub)
     _add_pick_next(sub)
     _add_record_result(sub)
+    _add_check_termination(sub)
     return p
 
 
@@ -260,6 +261,39 @@ def _handle_record_result(args: argparse.Namespace) -> int:
             }
         )
     )
+    return 0
+
+
+def _add_check_termination(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "check-termination",
+        help="check whether the loop should terminate; "
+        "JSON {experiments_run, consecutive_reverts} on stdin",
+    )
+
+
+@_register("check-termination")
+def _handle_check_termination(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.state import read_state
+    from sindri.core.termination import check_termination
+
+    try:
+        payload = json.loads(sys.stdin.read())
+        experiments_run = int(payload["experiments_run"])
+        consecutive_reverts = int(payload["consecutive_reverts"])
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+        print(f"error: invalid stdin payload: {e}", file=sys.stderr)
+        return 1
+
+    state = read_state()
+    result = check_termination(
+        state,
+        experiments_run=experiments_run,
+        consecutive_reverts=consecutive_reverts,
+    )
+    print(result.model_dump_json())
     return 0
 
 
