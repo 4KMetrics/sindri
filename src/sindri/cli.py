@@ -37,6 +37,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_pick_next(sub)
     _add_record_result(sub)
     _add_check_termination(sub)
+    _add_generate_pr_body(sub)
     return p
 
 
@@ -294,6 +295,23 @@ def _handle_check_termination(args: argparse.Namespace) -> int:
         consecutive_reverts=consecutive_reverts,
     )
     print(result.model_dump_json())
+    return 0
+
+
+def _add_generate_pr_body(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser("generate-pr-body", help="print PR body markdown to stdout")
+
+
+@_register("generate-pr-body")
+def _handle_generate_pr_body(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from sindri.core.pr_body import render_pr_body
+    from sindri.core.state import read_jsonl, read_state
+
+    state = read_state()
+    records = read_jsonl(Path(".sindri/current/sindri.jsonl"))
+    print(render_pr_body(state, records))
     return 0
 
 

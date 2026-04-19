@@ -363,3 +363,55 @@ class TestCheckTermination:
         assert data["terminated"] is True
         assert data["reason"] == "target_hit"
         assert data["auto_finalize"] is True
+
+
+class TestGeneratePrBody:
+    def test_emits_markdown(self, tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import append_jsonl, write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            JsonlExperiment,
+            JsonlTerminated,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0, status="kept")],
+            branch="sindri/test",
+            started_at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+            current_best=80.0,
+        )
+        d = tmp_path / ".sindri" / "current"
+        write_state(state, dir=d)
+        append_jsonl(
+            JsonlExperiment(
+                ts=datetime(2026, 4, 19, 10, 5, tzinfo=timezone.utc),
+                id=1, candidate="a", reps_used=1,
+                metric_before=100.0, metric_after=80.0, delta=-20.0,
+                confidence_ratio=20.0, status="improved",
+                commit_sha="abc1234", files_modified=["x.py"],
+            ),
+            path=d / "sindri.jsonl",
+        )
+        append_jsonl(
+            JsonlTerminated(
+                ts=datetime(2026, 4, 19, 10, 10, tzinfo=timezone.utc),
+                reason="target_hit", final_metric=80.0, delta_pct=-20.0,
+                kept=1, reverted=0, errored=0, wall_clock_seconds=600, auto_finalize=True,
+            ),
+            path=d / "sindri.jsonl",
+        )
+        r = _run_cli("generate-pr-body", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "## " in r.stdout
+        assert "−20" in r.stdout or "-20" in r.stdout
+        assert "abc1234" in r.stdout
