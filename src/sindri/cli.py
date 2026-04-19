@@ -34,6 +34,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_validate_benchmark(sub)
     _add_detect_mode(sub)
     _add_read_state(sub)
+    _add_pick_next(sub)
     return p
 
 
@@ -145,6 +146,28 @@ def _handle_read_state(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(state.model_dump_json())
+    return 0
+
+
+def _add_pick_next(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser("pick-next", help="pick next pending candidate from state")
+
+
+@_register("pick-next")
+def _handle_pick_next(args: argparse.Namespace) -> int:
+    from sindri.core.pool import pick_next
+    from sindri.core.state import StateIOError, read_state
+
+    try:
+        state = read_state()
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    nxt = pick_next(state.pool)
+    if nxt is None:
+        print("null")
+    else:
+        print(nxt.model_dump_json())
     return 0
 
 
