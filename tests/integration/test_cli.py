@@ -117,3 +117,41 @@ class TestDetectMode:
         assert r.returncode == 0, r.stderr
         data = json.loads(r.stdout)
         assert data["mode"] == "remote"
+
+
+class TestReadState:
+    def test_reads_existing_state(self, tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        sindri_dir = tmp_path / ".sindri" / "current"
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/test",
+            started_at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        write_state(state, dir=sindri_dir)
+
+        r = _run_cli("read-state", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["goal"]["metric_name"] == "x"
+        assert data["mode"] == "local"
+        assert len(data["pool"]) == 1
+
+    def test_missing_state_fails(self, tmp_path: Path) -> None:
+        r = _run_cli("read-state", cwd=tmp_path)
+        assert r.returncode != 0
+        assert "state" in r.stderr.lower()

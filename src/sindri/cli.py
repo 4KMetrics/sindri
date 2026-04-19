@@ -33,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _add_validate_benchmark(sub)
     _add_detect_mode(sub)
+    _add_read_state(sub)
     return p
 
 
@@ -127,6 +128,23 @@ def _handle_detect_mode(args: argparse.Namespace) -> int:
 
     mode = detect_mode(script, samples)
     print(json.dumps({"mode": mode}))
+    return 0
+
+
+def _add_read_state(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser("read-state", help="read .sindri/current/sindri.md; emit JSON")
+
+
+@_register("read-state")
+def _handle_read_state(args: argparse.Namespace) -> int:
+    from sindri.core.state import StateIOError, read_state
+
+    try:
+        state = read_state()
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(state.model_dump_json())
     return 0
 
 
