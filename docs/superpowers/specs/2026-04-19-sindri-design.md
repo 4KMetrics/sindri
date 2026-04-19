@@ -11,8 +11,6 @@ inspirations:
   - https://github.com/davebcn87/pi-autoresearch
 ---
 
-# Sindri — Design Spec
-
 ## 1. Executive summary
 
 **Sindri is a Claude Code plugin that runs bounded, target-driven optimization loops against any metric a user can measure deterministically.**
@@ -102,7 +100,7 @@ The skills invoke the Python core via the `Bash` tool: `python -m sindri <subcom
 
 ### 5.2 Three cooperating agents
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        User (in Claude Code)                         │
 │   issues /sindri <goal>, approves pool, walks away, reviews PR       │
@@ -296,7 +294,7 @@ Runtime dependency: `pydantic>=2.0,<3.0`. Nothing else beyond stdlib.
 |---|---|
 | `sindri/cli.py` | argparse entry point exposed as `python -m sindri`. Dispatches to subcommands. Each subcommand reads from stdin (for JSON input) or args, writes JSON to stdout. |
 | `sindri/core/state.py` | Typed read/write/append of `sindri.md` (structured YAML frontmatter + human-readable sections) and `sindri.jsonl` (pydantic models per line). |
-| `sindri/core/noise.py` | Baseline stats: mean, std_dev, coefficient of variation, noise_floor (std_dev, discarding warmup run 1). Confidence computation: `confidence_ratio(delta, floor) = |delta| / max(floor, eps)`. |
+| `sindri/core/noise.py` | Baseline stats: mean, std_dev, coefficient of variation, noise_floor (std_dev, discarding warmup run 1). Confidence computation: `confidence_ratio(delta, floor) = abs(delta) / max(floor, eps)`. |
 | `sindri/core/pool.py` | Ordering (default: remaining expected-impact descending). Termination predicates: target_hit, pool_empty, max_experiments, max_wall_clock, max_reverts_in_a_row, halted_by_user. |
 | `sindri/core/git_ops.py` | Wrappers around `git` subprocess calls: current branch, clean-or-dirty check, create_branch, commit_with_message, reset_hard, delete_branch, push_with_upstream. |
 | `sindri/core/metric.py` | Regex-based parsing of `METRIC <name>=<number>` from benchmark output. Handles scientific notation, integer, float. |
