@@ -49,42 +49,56 @@ class Candidate(BaseModel):
 
 
 class RepsPolicy(BaseModel):
+    # `max` and `adaptive` resolve based on `mode` when not provided.
+    # Unset (None) vs. passed-default (e.g. max=10 for remote) used to
+    # be conflated, silently stomping a caller's explicit choice.
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["local", "remote"]
     min: int = 1
-    max: int = 10
-    adaptive: bool = True
+    max: int | None = None
+    adaptive: bool | None = None
     confidence_threshold: float = 2.0
 
     def model_post_init(self, __context: object) -> None:
-        # Enforce mode-specific defaults unless explicitly overridden by caller.
-        # Remote mode is single-rep: trust the baseline, don't pay for multi-rep.
-        if self.mode == "remote":
-            if self.max > 1:
-                object.__setattr__(self, "max", 1)
-            object.__setattr__(self, "adaptive", False)
+        if self.max is None:
+            object.__setattr__(self, "max", 1 if self.mode == "remote" else 10)
+        if self.adaptive is None:
+            object.__setattr__(self, "adaptive", self.mode == "local")
 
 
 class Guardrails(BaseModel):
+    # `max_wall_clock_seconds` and `timeout_per_experiment_seconds` resolve
+    # based on `mode` when not provided. Previous implementation used a
+    # "if == local default, promote to remote default" pattern that silently
+    # overrode a caller who happened to pass the local value in remote mode.
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["local", "remote"]
     max_experiments: int = 50
-    max_wall_clock_seconds: int = 28800  # 8h for local
+    max_wall_clock_seconds: int | None = None
     max_reverts_in_a_row: int = 7
     baseline_reps: int = 3
-    timeout_per_experiment_seconds: int = 1800  # 30m for local
+    timeout_per_experiment_seconds: int | None = None
     reps_policy: RepsPolicy | None = None
 
     def model_post_init(self, __context: object) -> None:
         if self.reps_policy is None:
             object.__setattr__(self, "reps_policy", RepsPolicy(mode=self.mode))
-        if self.mode == "remote":
-            if self.max_wall_clock_seconds == 28800:
-                object.__setattr__(self, "max_wall_clock_seconds", 259200)  # 72h
-            if self.timeout_per_experiment_seconds == 1800:
-                object.__setattr__(self, "timeout_per_experiment_seconds", 7200)  # 2h
+        if self.max_wall_clock_seconds is None:
+            # 8h for local, 72h for remote.
+            object.__setattr__(
+                self,
+                "max_wall_clock_seconds",
+                259200 if self.mode == "remote" else 28800,
+            )
+        if self.timeout_per_experiment_seconds is None:
+            # 30m per experiment for local, 2h for remote.
+            object.__setattr__(
+                self,
+                "timeout_per_experiment_seconds",
+                7200 if self.mode == "remote" else 1800,
+            )
 
 
 class SindriState(BaseModel):
@@ -98,6 +112,15 @@ class SindriState(BaseModel):
     guardrails: Guardrails
     mode: Literal["local", "remote"]
     current_best: float | None = None
+
+    @field_validator("started_at")
+    @classmethod
+    def _require_tz_aware(cls, v: datetime) -> datetime:
+        # Naive datetimes silently "become UTC" downstream and mask wall-clock
+        # bugs; reject them at the boundary instead.
+        if v.tzinfo is None or v.tzinfo.utcoffset(v) is None:
+            raise ValueError("started_at must be timezone-aware")
+        return v
 
 
 class SubagentResult(BaseModel):

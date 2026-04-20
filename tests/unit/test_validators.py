@@ -1,7 +1,7 @@
 """Unit tests for pydantic models in sindri.core.validators."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -87,6 +87,16 @@ class TestRepsPolicy:
         assert p.max == 1
         assert p.adaptive is False
 
+    def test_remote_max_can_be_overridden(self) -> None:
+        # Explicit caller choice must win over the mode-based default —
+        # the previous implementation silently clamped to 1 on remote.
+        p = RepsPolicy(mode="remote", max=5)
+        assert p.max == 5
+
+    def test_remote_adaptive_can_be_overridden(self) -> None:
+        p = RepsPolicy(mode="remote", adaptive=True)
+        assert p.adaptive is True
+
 
 class TestGuardrails:
     def test_defaults_local(self) -> None:
@@ -104,6 +114,17 @@ class TestGuardrails:
         assert g.reps_policy is not None
         assert g.reps_policy.adaptive is False
 
+    def test_remote_respects_explicit_local_sized_wall_clock(self) -> None:
+        # A caller who passes 28800 on remote mode used to be silently
+        # promoted to 259200 (the sentinel-vs-match conflation). Pin the
+        # fix: explicit 28800 stays 28800.
+        g = Guardrails(mode="remote", max_wall_clock_seconds=28800)
+        assert g.max_wall_clock_seconds == 28800
+
+    def test_remote_respects_explicit_timeout(self) -> None:
+        g = Guardrails(mode="remote", timeout_per_experiment_seconds=1800)
+        assert g.timeout_per_experiment_seconds == 1800
+
 
 class TestSindriState:
     def test_minimal_state(self) -> None:
@@ -112,12 +133,26 @@ class TestSindriState:
             baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
             pool=[Candidate(id=1, name="a", expected_impact_pct=-5.0)],
             branch="sindri/reduce-x-10pct",
-            started_at=datetime(2026, 4, 19, 10, 0, 0),
+            started_at=datetime(2026, 4, 19, 10, 0, 0, tzinfo=timezone.utc),
             guardrails=Guardrails(mode="local"),
             mode="local",
         )
         assert s.goal.metric_name == "x"
         assert len(s.pool) == 1
+
+    def test_naive_started_at_rejected(self) -> None:
+        # Naive datetimes get silently coerced to UTC downstream, masking
+        # wall-clock bugs. The model rejects them at construction.
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            SindriState(
+                goal=Goal(metric_name="x", direction="reduce", target_pct=10.0),
+                baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+                pool=[],
+                branch="sindri/x",
+                started_at=datetime(2026, 4, 19, 10, 0, 0),
+                guardrails=Guardrails(mode="local"),
+                mode="local",
+            )
 
 
 class TestSubagentResult:
