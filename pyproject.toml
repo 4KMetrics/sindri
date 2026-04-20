@@ -19,6 +19,7 @@ dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
     "pytest-cov>=4.1",
+    "pyyaml>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -29,6 +30,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
 addopts = "-ra --strict-markers"
+markers = [
+    "e2e: full-lifecycle simulation tests (slow; ~10s+)",
+]
 
 [tool.coverage.run]
 source = ["src/sindri"]
