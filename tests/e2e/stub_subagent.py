@@ -40,7 +40,7 @@ def run_stub_experiment(
     if recipe.force_error:
         return {
             "metric_value": 0.0,
-            "reps_used": 0,
+            "reps_used": 1,
             "confidence_ratio": 0.0,
             "status": "errored",
             "files_modified": [],
@@ -49,7 +49,7 @@ def run_stub_experiment(
     if recipe.force_timeout:
         return {
             "metric_value": 0.0,
-            "reps_used": 0,
+            "reps_used": 1,
             "confidence_ratio": 0.0,
             "status": "timeout",
             "files_modified": [],
@@ -58,7 +58,7 @@ def run_stub_experiment(
     if recipe.force_check_failed:
         return {
             "metric_value": 0.0,
-            "reps_used": 0,
+            "reps_used": 1,
             "confidence_ratio": 0.0,
             "status": "check_failed",
             "files_modified": [],

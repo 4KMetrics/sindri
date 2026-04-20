@@ -148,3 +148,85 @@ def test_happy_path_target_hit(target_repo: Path) -> None:
     assert len(experiments) == 3, experiments
     assert all(e["status"] == "improved" for e in experiments)
     assert experiments[-1]["metric_after"] == 0.0  # all 3 files deleted
+
+
+@pytest.mark.e2e
+def test_pool_exhausted_no_wins(target_repo: Path) -> None:
+    """All candidates regress → terminate with pool_empty, auto_finalize=False, no PR."""
+    pool = [
+        {"id": 1, "name": "bloat a", "expected_impact_pct": -5, "files": []},
+        {"id": 2, "name": "bloat b", "expected_impact_pct": -5, "files": []},
+    ]
+    r = _sindri(
+        target_repo, "init",
+        "--goal", "reduce lines by 50%",
+        "--pool-json", json.dumps(pool),
+        "--script", ".claude/scripts/sindri/benchmark.py",
+    )
+    assert r.returncode == 0, r.stderr
+
+    recipes = {
+        "bloat a": StubAction(append_lines=5, files_modified=["src/_scratch.py"]),
+        "bloat b": StubAction(append_lines=5, files_modified=["src/_scratch.py"]),
+    }
+
+    for _ in range(5):
+        term = _check_termination(target_repo)
+        if term["terminated"]:
+            break
+        if _git(target_repo, "status", "--porcelain").strip():
+            subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
+        cand = json.loads(_sindri(target_repo, "pick-next").stdout)
+        if cand is None:
+            break
+        metric_before = _current_metric_before(target_repo)
+        result = run_stub_experiment(
+            target_repo, cand["name"], recipes[cand["name"]], current_best=metric_before,
+        )
+        # All regress → always reset.
+        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
+        payload = build_record_payload(
+            candidate_id=cand["id"], metric_before=metric_before,
+            subagent_result=result, commit_sha=None,
+        )
+        _sindri(target_repo, "record-result", stdin=payload)
+
+    term = _check_termination(target_repo)
+    assert term["terminated"] is True
+    assert term["reason"] == "pool_empty", term
+    assert term["auto_finalize"] is False, term
+
+    log = _git(target_repo, "log", "--oneline").splitlines()
+    kept = [line for line in log if "kept:" in line]
+    assert kept == [], f"expected no kept commits, got: {kept}"
+
+
+@pytest.mark.e2e
+def test_check_failed_not_retried(target_repo: Path) -> None:
+    """A candidate that check_fails must be marked dead after one run, not retried."""
+    pool = [{"id": 1, "name": "fails checks", "expected_impact_pct": -10, "files": []}]
+    r = _sindri(
+        target_repo, "init",
+        "--goal", "reduce lines by 10%",
+        "--pool-json", json.dumps(pool),
+        "--script", ".claude/scripts/sindri/benchmark.py",
+    )
+    assert r.returncode == 0, r.stderr
+
+    cand = json.loads(_sindri(target_repo, "pick-next").stdout)
+    metric_before = _current_metric_before(target_repo)
+    result = run_stub_experiment(
+        target_repo, cand["name"], StubAction(force_check_failed=True),
+        current_best=metric_before,
+    )
+    assert result["status"] == "check_failed"
+    payload = build_record_payload(
+        candidate_id=cand["id"], metric_before=metric_before,
+        subagent_result=result, commit_sha=None,
+    )
+    rec = _sindri(target_repo, "record-result", stdin=payload)
+    assert rec.returncode == 0, rec.stderr
+
+    # After record-result, pick-next must return null (check_failed is terminal per-candidate).
+    nxt = _sindri(target_repo, "pick-next").stdout.strip()
+    assert nxt == "null", f"check_failed candidate was re-picked: {nxt!r}"
