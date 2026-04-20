@@ -58,6 +58,18 @@ class TestScriptContentSignal:
         script.write_text("subprocess.run(['wget', 'https://example.com/data'])")
         assert script_content_signal(script) == "remote"
 
+    def test_wget_to_localhost_stays_local(self, tmp_path: Path) -> None:
+        # Docstring promises parity with curl: both are only flagged remote
+        # when pointing at a non-localhost URL.
+        script = tmp_path / "benchmark.py"
+        script.write_text("subprocess.run(['wget', 'http://localhost:8080/health'])")
+        assert script_content_signal(script) == "local"
+
+    def test_wget_to_127_0_0_1_stays_local(self, tmp_path: Path) -> None:
+        script = tmp_path / "benchmark.py"
+        script.write_text("subprocess.run(['wget', 'http://127.0.0.1:9090/metrics'])")
+        assert script_content_signal(script) == "local"
+
     def test_curlicue_does_not_flag_remote(self, tmp_path: Path) -> None:
         # Word-boundary guard: `curlicue` must not match `curl`.
         script = tmp_path / "benchmark.py"

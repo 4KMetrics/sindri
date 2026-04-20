@@ -193,7 +193,7 @@ def _handle_record_result(args: argparse.Namespace) -> int:
 
     from pydantic import BaseModel, ValidationError
 
-    from sindri.core.state import append_jsonl, read_state, write_state
+    from sindri.core.state import StateIOError, append_jsonl, read_state, write_state
     from sindri.core.validators import JsonlExperiment, SubagentResult
 
     class RecordPayload(BaseModel):
@@ -212,7 +212,11 @@ def _handle_record_result(args: argparse.Namespace) -> int:
         print(f"error: payload is not JSON: {e}", file=sys.stderr)
         return 1
 
-    state = read_state()
+    try:
+        state = read_state()
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
     if cand is None:
         print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
@@ -282,7 +286,7 @@ def _add_check_termination(sub: argparse._SubParsersAction) -> None:
 def _handle_check_termination(args: argparse.Namespace) -> int:
     import json
 
-    from sindri.core.state import read_state
+    from sindri.core.state import StateIOError, read_state
     from sindri.core.termination import check_termination
 
     try:
@@ -293,7 +297,11 @@ def _handle_check_termination(args: argparse.Namespace) -> int:
         print(f"error: invalid stdin payload: {e}", file=sys.stderr)
         return 1
 
-    state = read_state()
+    try:
+        state = read_state()
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     result = check_termination(
         state,
         experiments_run=experiments_run,
@@ -312,9 +320,13 @@ def _handle_generate_pr_body(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from sindri.core.pr_body import render_pr_body
-    from sindri.core.state import read_jsonl, read_state
+    from sindri.core.state import StateIOError, read_jsonl, read_state
 
-    state = read_state()
+    try:
+        state = read_state()
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     records = read_jsonl(Path(".sindri/current/sindri.jsonl"))
     print(render_pr_body(state, records))
     return 0

@@ -313,6 +313,25 @@ class TestRecordResult:
         r = _run_cli("record-result", cwd=tmp_path, input="not json")
         assert r.returncode != 0
 
+    def test_missing_state_clean_error(self, tmp_path: Path) -> None:
+        # No .sindri/current/ — handler must print a clean error and exit 1
+        # rather than crashing with an unhandled StateIOError traceback.
+        payload = json.dumps({
+            "candidate_id": 1,
+            "metric_before": 100.0,
+            "subagent_result": {
+                "metric_value": 90.0,
+                "reps_used": 1,
+                "confidence_ratio": 10.0,
+                "status": "improved",
+                "files_modified": [],
+            },
+        })
+        r = _run_cli("record-result", cwd=tmp_path, input=payload)
+        assert r.returncode == 1
+        assert "error:" in r.stderr
+        assert "Traceback" not in r.stderr
+
 
 class TestCheckTermination:
     def test_not_terminated(self, tmp_path: Path) -> None:
@@ -374,6 +393,13 @@ class TestCheckTermination:
         assert data["reason"] == "target_hit"
         assert data["auto_finalize"] is True
 
+    def test_missing_state_clean_error(self, tmp_path: Path) -> None:
+        payload = json.dumps({"experiments_run": 0, "consecutive_reverts": 0})
+        r = _run_cli("check-termination", cwd=tmp_path, input=payload)
+        assert r.returncode == 1
+        assert "error:" in r.stderr
+        assert "Traceback" not in r.stderr
+
 
 class TestGeneratePrBody:
     def test_emits_markdown(self, tmp_path: Path) -> None:
@@ -425,6 +451,12 @@ class TestGeneratePrBody:
         assert "## " in r.stdout
         assert "−20" in r.stdout or "-20" in r.stdout
         assert "abc1234" in r.stdout
+
+    def test_missing_state_clean_error(self, tmp_path: Path) -> None:
+        r = _run_cli("generate-pr-body", cwd=tmp_path)
+        assert r.returncode == 1
+        assert "error:" in r.stderr
+        assert "Traceback" not in r.stderr
 
 
 class TestArchive:

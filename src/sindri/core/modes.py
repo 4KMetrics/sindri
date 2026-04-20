@@ -18,7 +18,6 @@ from sindri.core.noise import NoiseComputationError, coefficient_of_variation
 # Tools that imply external-service calls (networked, cost-bearing, rate-limited).
 _REMOTE_TOOLS = [
     r"\bgh\b",
-    r"\bwget\b",
     r"\baws\b",
     r"\bgcloud\b",
     r"\bkubectl\b",
@@ -29,12 +28,18 @@ _REMOTE_TOOLS = [
     r"\baz\b",
 ]
 
-# `curl` is only remote if pointing at a non-localhost URL on the same line.
-# Separator between `curl` and the URL may be quotes, commas, spaces, etc.
+# `curl` and `wget` are only remote if pointing at a non-localhost URL on the
+# same line. Separator between the tool and URL may be quotes, spaces, commas,
+# etc. Both tools are commonly used for localhost health probes in benchmarks,
+# so keeping local-mode for those cases preserves measurement quality.
+_NON_LOCALHOST_URL = (
+    r"(https?://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])[^\s'\"]+)"
+)
 _CURL_WITH_REMOTE_URL = re.compile(
-    r"\bcurl\b[^\n]*?"
-    r"(https?://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])[^\s'\"]+)",
-    re.IGNORECASE,
+    r"\bcurl\b[^\n]*?" + _NON_LOCALHOST_URL, re.IGNORECASE
+)
+_WGET_WITH_REMOTE_URL = re.compile(
+    r"\bwget\b[^\n]*?" + _NON_LOCALHOST_URL, re.IGNORECASE
 )
 
 _COMBINED_REMOTE_RE = re.compile("|".join(_REMOTE_TOOLS), re.IGNORECASE)
@@ -47,11 +52,11 @@ def script_content_signal(script_path: Path) -> Literal["local", "remote"]:
     """Scan script content for external-tool references."""
     # Cap at 1 MiB — we're scanning for keywords, not loading bundles.
     text = script_path.read_text()[: 1 << 20]
-    # Check tools first (cheap regex)
+    # Check always-remote tools first (cheap regex).
     if _COMBINED_REMOTE_RE.search(text):
         return "remote"
-    # Check curl specifically, with localhost whitelist
-    if _CURL_WITH_REMOTE_URL.search(text):
+    # curl/wget — only remote if they point at a non-localhost URL.
+    if _CURL_WITH_REMOTE_URL.search(text) or _WGET_WITH_REMOTE_URL.search(text):
         return "remote"
     return "local"
 
