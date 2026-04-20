@@ -6,12 +6,15 @@ Handlers return an exit code (0 on success, non-zero on failure).
 from __future__ import annotations
 
 import argparse
-import sys
-from typing import Callable
-
 import re
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable
 
 from sindri import __version__
+
+if TYPE_CHECKING:
+    from sindri.core.validators import SindriState
 
 _HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {}
 
@@ -24,6 +27,21 @@ def _register(
         _HANDLERS[name] = fn
         return fn
     return decorator
+
+
+def _load_state_or_exit(**kwargs: Path) -> SindriState | None:
+    """Read state; on StateIOError, print `error: ...` to stderr and return None.
+
+    Handlers that want the "no active run" friendly path (e.g. `status`) should
+    catch StateIOError themselves — this helper is for the exit-1 path.
+    """
+    from sindri.core.state import StateIOError, read_state
+
+    try:
+        return read_state(**kwargs)
+    except StateIOError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -146,12 +164,8 @@ def _add_read_state(sub: argparse._SubParsersAction) -> None:
 
 @_register("read-state")
 def _handle_read_state(args: argparse.Namespace) -> int:
-    from sindri.core.state import StateIOError, read_state
-
-    try:
-        state = read_state()
-    except StateIOError as e:
-        print(f"error: {e}", file=sys.stderr)
+    state = _load_state_or_exit()
+    if state is None:
         return 1
     print(state.model_dump_json())
     return 0
@@ -164,12 +178,9 @@ def _add_pick_next(sub: argparse._SubParsersAction) -> None:
 @_register("pick-next")
 def _handle_pick_next(args: argparse.Namespace) -> int:
     from sindri.core.pool import pick_next
-    from sindri.core.state import StateIOError, read_state
 
-    try:
-        state = read_state()
-    except StateIOError as e:
-        print(f"error: {e}", file=sys.stderr)
+    state = _load_state_or_exit()
+    if state is None:
         return 1
     nxt = pick_next(state.pool)
     if nxt is None:
@@ -193,7 +204,7 @@ def _handle_record_result(args: argparse.Namespace) -> int:
 
     from pydantic import BaseModel, ValidationError
 
-    from sindri.core.state import StateIOError, append_jsonl, read_state, write_state
+    from sindri.core.state import append_jsonl, write_state
     from sindri.core.validators import JsonlExperiment, SubagentResult
 
     class RecordPayload(BaseModel):
@@ -212,10 +223,8 @@ def _handle_record_result(args: argparse.Namespace) -> int:
         print(f"error: payload is not JSON: {e}", file=sys.stderr)
         return 1
 
-    try:
-        state = read_state()
-    except StateIOError as e:
-        print(f"error: {e}", file=sys.stderr)
+    state = _load_state_or_exit()
+    if state is None:
         return 1
     cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
     if cand is None:
@@ -286,7 +295,6 @@ def _add_check_termination(sub: argparse._SubParsersAction) -> None:
 def _handle_check_termination(args: argparse.Namespace) -> int:
     import json
 
-    from sindri.core.state import StateIOError, read_state
     from sindri.core.termination import check_termination
 
     try:
@@ -297,10 +305,8 @@ def _handle_check_termination(args: argparse.Namespace) -> int:
         print(f"error: invalid stdin payload: {e}", file=sys.stderr)
         return 1
 
-    try:
-        state = read_state()
-    except StateIOError as e:
-        print(f"error: {e}", file=sys.stderr)
+    state = _load_state_or_exit()
+    if state is None:
         return 1
     result = check_termination(
         state,
@@ -317,15 +323,11 @@ def _add_generate_pr_body(sub: argparse._SubParsersAction) -> None:
 
 @_register("generate-pr-body")
 def _handle_generate_pr_body(args: argparse.Namespace) -> int:
-    from pathlib import Path
-
     from sindri.core.pr_body import render_pr_body
-    from sindri.core.state import StateIOError, read_jsonl, read_state
+    from sindri.core.state import read_jsonl
 
-    try:
-        state = read_state()
-    except StateIOError as e:
-        print(f"error: {e}", file=sys.stderr)
+    state = _load_state_or_exit()
+    if state is None:
         return 1
     records = read_jsonl(Path(".sindri/current/sindri.jsonl"))
     print(render_pr_body(state, records))
@@ -344,19 +346,14 @@ def _handle_archive(args: argparse.Namespace) -> int:
     import json
     import shutil
     from datetime import date
-    from pathlib import Path
-
-    from sindri.core.state import StateIOError, read_state
 
     current = Path(".sindri/current")
     if not current.exists():
         print("error: .sindri/current/ does not exist", file=sys.stderr)
         return 1
 
-    try:
-        state = read_state(dir=current)
-    except StateIOError as e:
-        print(f"error: cannot read state: {e}", file=sys.stderr)
+    state = _load_state_or_exit(dir=current)
+    if state is None:
         return 1
 
     # Slug is the branch name minus the 'sindri/' prefix. Sanitize it: a

@@ -67,6 +67,12 @@ class RepsPolicy(BaseModel):
             object.__setattr__(self, "adaptive", self.mode == "local")
 
 
+_LOCAL_WALL_CLOCK_SECONDS = 8 * 3600
+_REMOTE_WALL_CLOCK_SECONDS = 72 * 3600
+_LOCAL_EXPERIMENT_TIMEOUT_SECONDS = 30 * 60
+_REMOTE_EXPERIMENT_TIMEOUT_SECONDS = 2 * 3600
+
+
 class Guardrails(BaseModel):
     # `max_wall_clock_seconds` and `timeout_per_experiment_seconds` resolve
     # based on `mode` when not provided. Previous implementation used a
@@ -86,18 +92,20 @@ class Guardrails(BaseModel):
         if self.reps_policy is None:
             object.__setattr__(self, "reps_policy", RepsPolicy(mode=self.mode))
         if self.max_wall_clock_seconds is None:
-            # 8h for local, 72h for remote.
             object.__setattr__(
                 self,
                 "max_wall_clock_seconds",
-                259200 if self.mode == "remote" else 28800,
+                _REMOTE_WALL_CLOCK_SECONDS
+                if self.mode == "remote"
+                else _LOCAL_WALL_CLOCK_SECONDS,
             )
         if self.timeout_per_experiment_seconds is None:
-            # 30m per experiment for local, 2h for remote.
             object.__setattr__(
                 self,
                 "timeout_per_experiment_seconds",
-                7200 if self.mode == "remote" else 1800,
+                _REMOTE_EXPERIMENT_TIMEOUT_SECONDS
+                if self.mode == "remote"
+                else _LOCAL_EXPERIMENT_TIMEOUT_SECONDS,
             )
 
 

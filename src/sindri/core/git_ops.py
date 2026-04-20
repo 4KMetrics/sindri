@@ -32,13 +32,11 @@ def current_branch() -> str:
 
 def branch_exists(name: str) -> bool:
     """True if a local branch with `name` exists. Never raises."""
-    proc = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return proc.returncode == 0
+    try:
+        _run(["show-ref", "--verify", "--quiet", f"refs/heads/{name}"])
+        return True
+    except GitError:
+        return False
 
 
 def is_working_tree_clean() -> bool:
