@@ -163,3 +163,29 @@ class TestSkillSindriFinalize:
     def test_mentions_archive(self) -> None:
         body = self.PATH.read_text()
         assert "archive" in body.lower()
+
+
+class TestExperimentSubagentPrompt:
+    PATH = REPO_ROOT / "prompts" / "experiment-subagent.md"
+
+    def test_exists(self) -> None:
+        assert self.PATH.is_file()
+
+    def test_declares_output_contract(self) -> None:
+        body = self.PATH.read_text()
+        for field in ("metric_value", "reps_used", "confidence_ratio", "status", "files_modified"):
+            assert field in body, f"output contract missing field: {field}"
+        for status in ("improved", "regressed", "inconclusive", "check_failed", "errored", "timeout"):
+            assert status in body, f"status value missing: {status}"
+
+    def test_declares_input_placeholders(self) -> None:
+        body = self.PATH.read_text()
+        for placeholder in ("$CANDIDATE", "$BENCHMARK_CMD", "$METRIC", "$CURRENT_BEST", "$NOISE_FLOOR", "$MODE", "$TIMEOUT_SECONDS"):
+            assert placeholder in body, f"placeholder missing: {placeholder}"
+
+    def test_prohibits_commit_push_and_sindri_writes(self) -> None:
+        body = self.PATH.read_text().lower()
+        # Allow "do not commit", "do not `git commit`", "must not commit", etc.
+        assert re.search(r"(do|must) not\W+(`?git )?commit", body), "must prohibit git commit"
+        assert re.search(r"(do|must) not\W+(`?git )?push", body), "must prohibit git push"
+        assert ".sindri/" in body
