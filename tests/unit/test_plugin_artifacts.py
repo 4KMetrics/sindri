@@ -87,3 +87,23 @@ class TestSkillSindriStart:
     def test_references_scaffold_benchmark_subflow(self) -> None:
         body = self.PATH.read_text()
         assert "sindri-scaffold-benchmark" in body
+
+
+class TestSkillSindriScaffoldBenchmark:
+    PATH = _skill_path("sindri-scaffold-benchmark")
+
+    def test_exists(self) -> None:
+        assert self.PATH.is_file()
+
+    def test_frontmatter(self) -> None:
+        fm = _parse_frontmatter(self.PATH)
+        assert fm.get("name") == "sindri-scaffold-benchmark"
+        assert fm.get("description", "").strip()
+
+    def test_cli_calls_are_known(self) -> None:
+        for cmd in _cli_calls(self.PATH.read_text()):
+            assert cmd in VALID_CLI_SUBCOMMANDS
+
+    def test_mentions_metric_output_contract(self) -> None:
+        body = self.PATH.read_text()
+        assert "METRIC" in body
