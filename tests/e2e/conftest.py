@@ -57,6 +57,8 @@ def target_repo(tmp_path: Path) -> Path:
     )
     bench.chmod(0o755)
 
+    (repo / ".gitignore").write_text(".sindri/\n", encoding="utf-8")
+
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)

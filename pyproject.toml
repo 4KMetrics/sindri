@@ -30,6 +30,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
 addopts = "-ra --strict-markers"
+markers = [
+    "e2e: full-lifecycle simulation tests (slow; ~10s+)",
+]
 
 [tool.coverage.run]
 source = ["src/sindri"]
