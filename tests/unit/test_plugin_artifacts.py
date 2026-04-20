@@ -46,3 +46,24 @@ class TestPluginManifest:
         for key in ("name", "description", "version", "author"):
             assert key in data, f"missing required field: {key}"
         assert data["name"] == "sindri"
+
+
+class TestSlashCommand:
+    COMMAND_PATH = REPO_ROOT / "commands" / "sindri.md"
+
+    def test_command_file_exists(self) -> None:
+        assert self.COMMAND_PATH.is_file()
+
+    def test_command_frontmatter_has_description(self) -> None:
+        fm = _parse_frontmatter(self.COMMAND_PATH)
+        assert "description" in fm and fm["description"].strip(), "command needs a description"
+
+    def test_command_mentions_subcommands(self) -> None:
+        body = self.COMMAND_PATH.read_text()
+        for sub in ("status", "stop", "scaffold-benchmark", "clear"):
+            assert sub in body, f"command body should reference subcommand: {sub}"
+
+    def test_command_routes_to_skills(self) -> None:
+        body = self.COMMAND_PATH.read_text()
+        for skill in ("sindri-start", "sindri-loop", "sindri-finalize", "sindri-scaffold-benchmark"):
+            assert skill in body, f"command body should name skill: {skill}"
