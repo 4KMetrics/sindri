@@ -633,3 +633,51 @@ class TestInit:
             cwd=tmp_path,
         )
         assert r.returncode != 0
+
+    def test_init_rejects_goal_with_trailing_junk(self, tmp_path: Path) -> None:
+        # A `search`-based parser silently took the prefix; fullmatch refuses.
+        pool_json = json.dumps([])
+        r = _run_cli(
+            "init",
+            "--goal", "reduce bundle_bytes by 15% and also make coffee",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        assert r.returncode != 0
+        assert "malformed goal" in r.stderr
+
+    def test_init_fails_fast_if_branch_exists(self, tmp_path: Path) -> None:
+        # Set up a repo where the target branch (sindri/reduce-bundle-bytes-15pct)
+        # already exists from a prior aborted run. init must reject BEFORE
+        # spending three benchmark runs, and the benchmark script here is a
+        # sleep-forever — if the guard fails, the test will hang.
+        (tmp_path / "README.md").write_text("# test\n")
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import time\n"
+            "time.sleep(3600)\n"  # never reached if the guard works
+        )
+        script.chmod(0o755)
+
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "branch", "sindri/reduce-bundle-bytes-15pct"],
+            check=True, cwd=tmp_path, capture_output=True,
+        )
+
+        pool_json = json.dumps([])
+        r = _run_cli(
+            "init",
+            "--goal", "reduce bundle_bytes by 15%",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        assert r.returncode != 0
+        assert "already exists" in r.stderr

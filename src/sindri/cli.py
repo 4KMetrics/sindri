@@ -421,8 +421,8 @@ def _handle_status(args: argparse.Namespace) -> int:
 
 
 _GOAL_RE = re.compile(
-    r"(?P<direction>reduce|increase)\s+(?P<metric>[a-z][a-z0-9_]*)"
-    r"\s+by\s+(?P<pct>\d+(?:\.\d+)?)\s*%",
+    r"\s*(?P<direction>reduce|increase)\s+(?P<metric>[a-z][a-z0-9_]*)"
+    r"\s+by\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*",
     re.IGNORECASE,
 )
 
@@ -457,7 +457,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     from datetime import datetime, timezone
     from pathlib import Path
 
-    from sindri.core.git_ops import GitError, create_branch
+    from sindri.core.git_ops import GitError, branch_exists, create_branch
     from sindri.core.metric import MetricParseError, parse_metric_line
     from sindri.core.modes import detect_mode
     from sindri.core.noise import noise_floor
@@ -481,7 +481,9 @@ def _handle_init(args: argparse.Namespace) -> int:
         )
         return 1
 
-    m = _GOAL_RE.search(args.goal)
+    # fullmatch rejects goals like "reduce x by 15% and make coffee" — `search`
+    # used to silently consume only the prefix and drop the trailing junk.
+    m = _GOAL_RE.fullmatch(args.goal)
     if not m:
         print(
             "error: malformed goal — expected 'reduce|increase <metric> by <N>%'",
@@ -512,6 +514,20 @@ def _handle_init(args: argparse.Namespace) -> int:
     script = Path(args.script)
     if not script.exists():
         print(f"error: benchmark.py not found at {script}", file=sys.stderr)
+        return 1
+
+    # Fail fast on a taken branch name BEFORE spending three baseline runs
+    # — reusing them would silently clobber a prior aborted run's history.
+    prospective_slug = (
+        f"{direction}-{metric_name.replace('_', '-')}-{int(target_pct)}pct"
+    )
+    prospective_branch = f"sindri/{prospective_slug}"
+    if branch_exists(prospective_branch):
+        print(
+            f"error: branch {prospective_branch!r} already exists — "
+            f"delete it or archive the prior run first",
+            file=sys.stderr,
+        )
         return 1
 
     samples: list[float] = []
@@ -555,8 +571,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     mean_val = sum(post_warmup) / len(post_warmup)
     mode = detect_mode(script, samples)
 
-    slug = f"{direction}-{metric_name.replace('_', '-')}-{int(target_pct)}pct"
-    branch_name = f"sindri/{slug}"
+    branch_name = prospective_branch
     try:
         create_branch(branch_name)
     except GitError as e:

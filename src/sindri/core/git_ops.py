@@ -30,6 +30,17 @@ def current_branch() -> str:
     return _run(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
 
 
+def branch_exists(name: str) -> bool:
+    """True if a local branch with `name` exists. Never raises."""
+    proc = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
 def is_working_tree_clean() -> bool:
     """True if there are no uncommitted tracked or untracked changes."""
     out = _run(["status", "--porcelain"])

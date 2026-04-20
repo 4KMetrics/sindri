@@ -8,6 +8,7 @@ import pytest
 
 from sindri.core.git_ops import (
     GitError,
+    branch_exists,
     commit_all_with_message,
     create_branch,
     current_branch,
@@ -90,3 +91,16 @@ class TestDeleteBranch:
         create_branch("sindri/current-feature")
         with pytest.raises(GitError):
             delete_branch("sindri/current-feature", force=True)
+
+
+class TestBranchExists:
+    def test_main_exists(self, tmp_git_repo: Path) -> None:
+        assert branch_exists("main") is True
+
+    def test_nonexistent_returns_false(self, tmp_git_repo: Path) -> None:
+        assert branch_exists("sindri/definitely-not-there") is False
+
+    def test_after_create(self, tmp_git_repo: Path) -> None:
+        assert branch_exists("sindri/fresh") is False
+        create_branch("sindri/fresh")
+        assert branch_exists("sindri/fresh") is True
