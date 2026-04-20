@@ -24,9 +24,11 @@ def _run_cli(
 
 class TestCliBasics:
     def test_version(self) -> None:
+        from importlib.metadata import version
+
         r = _run_cli("--version")
         assert r.returncode == 0
-        assert "0.1.0" in r.stdout
+        assert version("sindri") in r.stdout
 
     def test_help_lists_subcommands(self) -> None:
         r = _run_cli("--help")
