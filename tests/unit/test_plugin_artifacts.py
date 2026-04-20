@@ -30,7 +30,7 @@ def _skill_path(name: str) -> Path:
 
 def _cli_calls(body: str) -> set[str]:
     """Extract sub-command names from `python -m sindri <cmd>` references."""
-    return set(re.findall(r"python -m sindri (\S+)", body))
+    return set(re.findall(r"python -m sindri ([a-z][a-z0-9-]*)", body))
 
 
 class TestPluginManifest:
@@ -67,3 +67,23 @@ class TestSlashCommand:
         body = self.COMMAND_PATH.read_text()
         for skill in ("sindri-start", "sindri-loop", "sindri-finalize", "sindri-scaffold-benchmark"):
             assert skill in body, f"command body should name skill: {skill}"
+
+
+class TestSkillSindriStart:
+    PATH = _skill_path("sindri-start")
+
+    def test_exists(self) -> None:
+        assert self.PATH.is_file()
+
+    def test_frontmatter_has_name_and_description(self) -> None:
+        fm = _parse_frontmatter(self.PATH)
+        assert fm.get("name") == "sindri-start"
+        assert fm.get("description", "").strip()
+
+    def test_cli_calls_are_known_subcommands(self) -> None:
+        for cmd in _cli_calls(self.PATH.read_text()):
+            assert cmd in VALID_CLI_SUBCOMMANDS, f"unknown subcommand: {cmd}"
+
+    def test_references_scaffold_benchmark_subflow(self) -> None:
+        body = self.PATH.read_text()
+        assert "sindri-scaffold-benchmark" in body
