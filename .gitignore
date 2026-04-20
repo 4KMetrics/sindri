@@ -17,10 +17,6 @@ dist/
 build/
 .venv/
 venv/
-.python-version
-
-# uv
-uv.lock
 
 # OS
 .DS_Store
