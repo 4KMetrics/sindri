@@ -22,11 +22,13 @@ Parse `$GOAL_STATEMENT` (the argument after `/sindri`) into three fields:
 - `direction` — `reduce` or `increase`
 - `target_pct` — a percentage change (integer)
 
-Accepted shapes:
+Accepted shapes (the only verbs the downstream CLI accepts are `reduce` and `increase`):
 
 - `reduce bundle_bytes by 15%` → `{reduce, bundle_bytes, 15}`
-- `increase test coverage by 10%` → `{increase, test_coverage, 10}`
-- `cut ci_seconds 25%` → `{reduce, ci_seconds, 25}`
+- `increase test_coverage by 10%` → `{increase, test_coverage, 10}`
+- `reduce ci_seconds by 25%` → `{reduce, ci_seconds, 25}`
+
+If the user phrases it differently (e.g., "cut X by N%", "shrink Y"), **normalize** to one of the two verbs above and confirm with the user before continuing — do not pass the raw input to `sindri init`, whose regex will reject anything that doesn't start with `reduce` or `increase`.
 
 If you can't parse it confidently, print **three concrete examples** and ask the user to rephrase. Do not guess.
 
@@ -85,11 +87,11 @@ Serialize the approved pool to a JSON array:
 ]
 ```
 
-Then run:
+Then run (using the **normalized** goal string, always in `reduce|increase <metric> by <N>%` form — never the raw user input):
 
 ```bash
 python -m sindri init \
-  --goal "<original goal statement>" \
+  --goal "<normalized goal — e.g. 'reduce bundle_bytes by 15%'>" \
   --pool-json "$POOL_JSON" \
   --script .claude/scripts/sindri/benchmark.py
 ```
