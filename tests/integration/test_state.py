@@ -123,9 +123,13 @@ class TestJsonlAppend:
     def test_read_jsonl_missing_returns_empty(self, tmp_sindri_dir: Path) -> None:
         assert read_jsonl(tmp_sindri_dir / "nonexistent.jsonl") == []
 
-    def test_read_jsonl_skips_malformed_but_records_warning(self, tmp_sindri_dir: Path) -> None:
+    def test_read_jsonl_skips_malformed_but_records_warning(
+        self, tmp_sindri_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         # Corrupt jsonl (e.g. from a partial write after a crash) — we skip
-        # malformed lines rather than refusing to read at all.
+        # malformed lines rather than refusing to read at all, but surface
+        # the skip on stderr so silent data loss doesn't masquerade as
+        # "no activity" in downstream renderers.
         path = tmp_sindri_dir / "sindri.jsonl"
         path.write_text(
             '{"type":"session_start","ts":"2026-04-19T10:00:00+00:00","goal":"x","target_pct":-10.0,"mode":"local"}\n'
@@ -134,3 +138,6 @@ class TestJsonlAppend:
         )
         records = read_jsonl(path)
         assert len(records) == 2  # malformed line skipped
+        captured = capsys.readouterr()
+        assert "warning" in captured.err
+        assert "line 2" in captured.err

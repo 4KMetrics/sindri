@@ -9,6 +9,7 @@ sindri.jsonl is append-only; each line is one JSON-serialized pydantic model.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
@@ -63,29 +64,37 @@ def append_jsonl(
     """Append a single pydantic record as one line to the jsonl file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     line = record.model_dump_json()
-    # Single write in append mode — on POSIX, a write() under PIPE_BUF is
-    # atomic; sindri is a single-writer process so this is documentation
-    # of intent more than a concurrency guarantee.
+    # Safe because sindri is a single-writer process per .sindri/current/.
+    # The earlier comment cited POSIX PIPE_BUF atomicity, which only applies
+    # to pipes — regular file writes of any size race across processes.
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
 def read_jsonl(path: Path) -> list[JsonlRecord]:
-    """Read all records from a jsonl file. Skips malformed lines (returns only valid)."""
+    """Read all records from a jsonl file.
+
+    Skips malformed lines rather than refusing to read at all — a partial
+    write after a crash shouldn't block access to valid records. Every skip
+    is surfaced on stderr so a silently truncated PR body is never
+    attributed to "no activity" by a human reviewer.
+    """
     if not path.exists():
         return []
     out: list[JsonlRecord] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for line_no, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
         if not line:
             continue
         try:
             raw = json.loads(line)
             rec = _jsonl_adapter.validate_python(raw)
             out.append(rec)
-        except (json.JSONDecodeError, ValidationError):
-            # Skip malformed lines — a partial-write after a crash is
-            # recoverable and shouldn't block reading valid records.
+        except (json.JSONDecodeError, ValidationError) as e:
+            print(
+                f"sindri: warning: skipping malformed jsonl line {line_no} in {path}: {e}",
+                file=sys.stderr,
+            )
             continue
     return out
 
