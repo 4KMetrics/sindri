@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/4KMetrics/sindri/compare/v0.2.0...v0.3.0) (2026-04-21)
+
+
+### Features
+
+* **plugin:** add community marketplace manifest + metadata enrichment ([#7](https://github.com/4KMetrics/sindri/issues/7)) ([fff07c5](https://github.com/4KMetrics/sindri/commit/fff07c5dea056041c38011744ba8126e51c816fb))
+
 ## [0.2.0](https://github.com/4KMetrics/sindri/compare/v0.1.1...v0.2.0) (2026-04-21)
 
 
