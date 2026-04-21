@@ -1,9 +1,10 @@
 name: publish
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:  # manual re-trigger for missed releases
+  push:
+    tags: ["v*.*.*"]       # release-please creates these; GITHUB_TOKEN tag
+                            # pushes DO trigger downstream workflows here.
+  workflow_dispatch:        # manual re-trigger for missed releases
 
 jobs:
   pypi:

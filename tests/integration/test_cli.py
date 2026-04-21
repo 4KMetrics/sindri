@@ -28,7 +28,8 @@ class TestCliBasics:
 
         r = _run_cli("--version")
         assert r.returncode == 0
-        assert version("sindri") in r.stdout
+        # Distribution name differs from module name — PyPI name is sindri-forge.
+        assert version("sindri-forge") in r.stdout
 
     def test_help_lists_subcommands(self) -> None:
         r = _run_cli("--help")
