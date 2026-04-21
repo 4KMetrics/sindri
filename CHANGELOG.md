@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/4KMetrics/sindri/compare/v0.3.0...v0.3.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* **ci:** rename PyPI dist to sindri-forge; publish on tag push ([#10](https://github.com/4KMetrics/sindri/issues/10)) ([432b50c](https://github.com/4KMetrics/sindri/commit/432b50c4247fae56bcaf17e8c5a0096cd8812871))
+
 ## [0.3.0](https://github.com/4KMetrics/sindri/compare/v0.2.0...v0.3.0) (2026-04-21)
 
 
