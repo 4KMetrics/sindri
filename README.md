@@ -10,24 +10,30 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 
 ## Install
 
-Local-dev plugin. To use it in another repo:
+One command:
 
 ```bash
-# From this repo
-uv pip install -e .
-
-# Symlink the plugin into ~/.claude/plugins/
-ln -s "$(pwd -P)" ~/.claude/plugins/sindri
+git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
+cd ~/src/sindri && ./scripts/install-plugin.sh
 ```
 
-Restart Claude Code. Verify: `/sindri status` should report "no active run" cleanly.
+That script installs the `sindri` Python package into your active environment and symlinks the plugin into `~/.claude/plugins/sindri`. Restart Claude Code afterward. Verify: `/sindri status` should report "no active run" cleanly.
+
+To target a specific Python (e.g. a venv), pass it via env var:
+
+```bash
+SINDRI_PYTHON=/path/to/venv/bin/python ./scripts/install-plugin.sh
+```
 
 Requirements:
 
-- Python ≥ 3.10 with `pydantic>=2.0,<3.0` and `pyyaml>=6.0` (dev)
+- Python ≥ 3.10 (pydantic 2 is the only runtime dep; pyyaml is dev-only)
 - `git` ≥ 2.30
 - `gh` CLI (authenticated) — needed only for `sindri-finalize` PR creation
 - Claude Code CLI with `Task` + `ScheduleWakeup` tools
+- `uv` (optional, faster install) or `pip`
+
+**First-run dogfood:** walk through [`docs/DOGFOOD.md`](docs/DOGFOOD.md) on a throwaway repo before pointing sindri at real code — it verifies every skill path and catches environment gaps before you commit an overnight run.
 
 ## Quickstart
 
