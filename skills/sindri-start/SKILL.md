@@ -10,9 +10,14 @@ You are the interactive scaffolder. Your job is to go from *"user typed a goal"*
 
 ## Pre-flight (fail fast)
 
-1. Run `python -m sindri status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri` (orchestrator will resume), or abandon with `/sindri clear` and start fresh."* Do not proceed.
-2. Run `git status --porcelain`. If the working tree is dirty, STOP — print: *"Working tree has uncommitted changes. Commit or stash before starting a sindri run so the baseline is reproducible."* Do not proceed.
-3. Run `gh auth status`. If unauthenticated, warn: *"`gh` is not authenticated. Sindri will still run experiments, but `sindri-finalize` will fail to open a PR at the end. Run `gh auth login` now, or continue without auto-PR."* Continue only if the user acknowledges.
+1. **Python package available.** Run `python -m sindri --version`. If it fails with `No module named sindri` (or similar), STOP — print: *"The `sindri` Python package isn't installed in the current Python environment. From the plugin directory (`~/.claude/plugins/sindri`) run `./scripts/install-plugin.sh`, or `uv pip install sindri` once it's published to PyPI. Then re-run `/sindri`."* Do not proceed.
+2. **No active run.** Run `python -m sindri status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri` (orchestrator will resume), or abandon with `/sindri clear` and start fresh."* Do not proceed.
+3. **`.sindri/` is gitignored.** Check `.gitignore` for a line matching `.sindri/` (or `.sindri`, or `.sindri/**`). If missing:
+   - If `.gitignore` exists, offer: *"Sindri writes run state to `.sindri/` (on-disk singleton). That directory must be gitignored so it doesn't get committed into the optimization branch. I'll add `.sindri/` to `.gitignore` now — OK?"* On yes, append `.sindri/\n` to `.gitignore`, stage + commit with message `chore: gitignore .sindri/ (sindri state dir)`.
+   - If `.gitignore` does NOT exist, create it with `.sindri/\n` and commit the same way.
+   - If the user declines, STOP. Do not proceed without the ignore rule.
+4. **Clean working tree.** Run `git status --porcelain`. If non-empty (after the gitignore commit, if any), STOP — print: *"Working tree has uncommitted changes. Commit or stash before starting a sindri run so the baseline is reproducible."* Do not proceed.
+5. **`gh` CLI available.** Run `gh auth status`. If unauthenticated, warn: *"`gh` is not authenticated. Sindri will still run experiments, but `sindri-finalize` will fail to open a PR at the end. Run `gh auth login` now, or continue without auto-PR."* Continue only if the user acknowledges.
 
 ## 1. Parse the goal
 
