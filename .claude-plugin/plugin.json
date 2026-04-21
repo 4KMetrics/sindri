@@ -1,7 +1,7 @@
 {
   "name": "sindri",
   "description": "Bounded, target-driven optimization loops for any metric you can measure deterministically. Autonomous experiments, kept-or-reverted per git commit, auto-PR on success.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Nimesh Kumar",
     "email": "260103116+4kmetrics@users.noreply.github.com"
