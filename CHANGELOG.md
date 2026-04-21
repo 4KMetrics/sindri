@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/4KMetrics/sindri/compare/v0.3.1...v0.3.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* version from pyproject metadata; publish via workflow_run ([#12](https://github.com/4KMetrics/sindri/issues/12)) ([de7a1aa](https://github.com/4KMetrics/sindri/commit/de7a1aafda88692f75c2da73981cf1624461e639))
+
 ## [0.3.1](https://github.com/4KMetrics/sindri/compare/v0.3.0...v0.3.1) (2026-04-21)
 
 
