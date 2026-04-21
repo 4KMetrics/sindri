@@ -48,6 +48,32 @@ class TestPluginManifest:
         assert data["name"] == "sindri"
 
 
+class TestMarketplaceManifest:
+    PATH = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+
+    def test_exists(self) -> None:
+        assert self.PATH.is_file()
+
+    def test_parses(self) -> None:
+        data = json.loads(self.PATH.read_text())
+        assert isinstance(data, dict)
+
+    def test_required_fields(self) -> None:
+        data = json.loads(self.PATH.read_text())
+        for key in ("name", "owner", "plugins"):
+            assert key in data, f"missing top-level field: {key}"
+        assert isinstance(data["plugins"], list) and data["plugins"], "plugins must be a non-empty list"
+
+    def test_sindri_plugin_entry(self) -> None:
+        data = json.loads(self.PATH.read_text())
+        sindri = next((p for p in data["plugins"] if p.get("name") == "sindri"), None)
+        assert sindri is not None, "marketplace.json must list a plugin named 'sindri'"
+        assert sindri.get("source"), "sindri entry must have a source"
+        # source may be a relative string ('./') or an object; tolerate both.
+        src = sindri["source"]
+        assert isinstance(src, (str, dict))
+
+
 class TestSlashCommand:
     COMMAND_PATH = REPO_ROOT / "commands" / "sindri.md"
 

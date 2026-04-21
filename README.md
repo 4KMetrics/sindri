@@ -10,20 +10,29 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 
 ## Install
 
-### Option 1 — PyPI + symlink (preferred once published)
+### Option 1 — Claude Code marketplace (easiest, once PyPI is up)
+
+```
+/plugin marketplace add 4KMetrics/sindri
+/plugin install sindri@4kmetrics
+```
+
+Then install the Python runtime once (the plugin calls `python -m sindri`):
 
 ```bash
 uv pip install sindri                                            # or: pip install sindri
-git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
-ln -sfn ~/src/sindri ~/.claude/plugins/sindri
 ```
 
-### Option 2 — local dev install
+Restart Claude Code. Done.
+
+### Option 2 — local dev install (no marketplace)
 
 ```bash
 git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
 cd ~/src/sindri && ./scripts/install-plugin.sh
 ```
+
+The install script handles the Python package + the `~/.claude/plugins/sindri` symlink in one go.
 
 That script installs the `sindri` Python package into your active environment and symlinks the plugin into `~/.claude/plugins/sindri`. Restart Claude Code afterward. Verify: `/sindri status` should report "no active run" cleanly.
 
