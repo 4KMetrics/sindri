@@ -10,24 +10,32 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 
 ## Install
 
-### Option 1 — Claude Code marketplace (easiest, once PyPI is up)
+### Option 1 — Official Anthropic marketplace (once approved + PyPI live)
+
+Pending Anthropic review via [platform.claude.com/plugins/submit](https://platform.claude.com/plugins/submit). Once approved AND `sindri-forge` is published on PyPI:
+
+```
+/plugin install sindri@claude-plugins-official
+uv pip install sindri-forge
+```
+
+Restart Claude Code. Done.
+
+### Option 2 — Community marketplace (works today, once PyPI is live)
+
+No Anthropic review required — the plugin is served directly from this repo's `.claude-plugin/marketplace.json`:
 
 ```
 /plugin marketplace add 4KMetrics/sindri
 /plugin install sindri@4kmetrics
-```
-
-Then install the Python runtime once (the plugin calls `python -m sindri`):
-
-```bash
-uv pip install sindri-forge                                      # or: pip install sindri-forge
+uv pip install sindri-forge
 ```
 
 The PyPI distribution is `sindri-forge` (the `sindri` name was taken by an unrelated ZK-proof SDK). The imported module name is still `sindri`.
 
-Restart Claude Code. Done.
+Restart Claude Code.
 
-### Option 2 — local dev install (no marketplace)
+### Option 3 — local dev install (no marketplace, no PyPI dependency)
 
 ```bash
 git clone https://github.com/4KMetrics/sindri.git ~/src/sindri

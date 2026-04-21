@@ -17,6 +17,12 @@ dist/
 build/
 .venv/
 venv/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local progress scratch (not source of truth)
+progress/
 
 # OS
 .DS_Store

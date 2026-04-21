@@ -171,7 +171,7 @@ Create `.claude-plugin/plugin.json`:
   "description": "Bounded, target-driven optimization loops for any metric you can measure deterministically. Autonomous experiments, kept-or-reverted per git commit, auto-PR on success.",
   "version": "0.2.0",
   "author": {
-    "name": "Nimesh Kumar",
+    "name": "4KMetrics",
     "email": "260103116+4kmetrics@users.noreply.github.com"
   },
   "homepage": "https://github.com/4KMetrics/sindri",
