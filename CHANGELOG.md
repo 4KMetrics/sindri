@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/4KMetrics/sindri/compare/v0.1.1...v0.2.0) (2026-04-21)
+
+
+### Features
+
+* user-ready shipping (install script + dogfood + PyPI + pre-flight) ([#6](https://github.com/4KMetrics/sindri/issues/6)) ([37066ed](https://github.com/4KMetrics/sindri/commit/37066ed850e824149161d4ab10b0fa064b6567aa))
+
+
+### Bug Fixes
+
+* **ci:** release-please feat commits should bump minor pre-1.0 ([#4](https://github.com/4KMetrics/sindri/issues/4)) ([db4fe94](https://github.com/4KMetrics/sindri/commit/db4fe94426353f81c9c4e2dba9587f1ad38be594))
+
 ## [0.1.1](https://github.com/4KMetrics/sindri/compare/v0.1.0...v0.1.1) (2026-04-20)
 
 
