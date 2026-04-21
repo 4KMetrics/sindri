@@ -7,5 +7,15 @@
     "email": "thisisme.nimesh@gmail.com"
   },
   "homepage": "https://github.com/4KMetrics/sindri",
-  "license": "MIT"
+  "repository": "https://github.com/4KMetrics/sindri",
+  "license": "MIT",
+  "keywords": [
+    "optimization",
+    "benchmarking",
+    "autonomous",
+    "experiments",
+    "performance",
+    "ci",
+    "bundle-size"
+  ]
 }
