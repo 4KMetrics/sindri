@@ -1,39 +1,68 @@
 name: publish
 
 on:
-  push:
-    tags: ["v*.*.*"]       # release-please creates these; GITHUB_TOKEN tag
-                            # pushes DO trigger downstream workflows here.
-  workflow_dispatch:        # manual re-trigger for missed releases
+  workflow_run:
+    workflows: ["release-please"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  id-token: write  # required for PyPI trusted publisher (OIDC)
+  contents: read
 
 jobs:
   pypi:
     name: build + publish to PyPI
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # required for PyPI trusted publisher (OIDC)
-      contents: read
+    # workflow_run fires on every release-please completion (PR updates + real
+    # releases). Only proceed when the upstream run succeeded, and then let the
+    # release-tag check inside the job decide whether a real release happened.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Fetch full history + tags so we can detect release commits.
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Detect release tag at HEAD
+        id: gate
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          # HEAD is a release when the current commit has a matching v<semver> tag.
+          if TAG=$(git describe --tags --exact-match HEAD 2>/dev/null); then
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo ">> HEAD is release tag: $TAG"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo ">> HEAD has no exact release tag — skipping publish."
+          fi
 
       - name: Set up Python
+        if: steps.gate.outputs.is_release == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install build tooling
+        if: steps.gate.outputs.is_release == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install build
 
       - name: Build wheel + sdist
+        if: steps.gate.outputs.is_release == 'true'
         run: python -m build
 
       - name: Publish to PyPI
+        if: steps.gate.outputs.is_release == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         # Uses PyPI trusted publishing — no API token needed.
-        # One-time setup on PyPI:
-        #   Project settings → Publishing → Add a new publisher
-        #     Repository: 4KMetrics/sindri
-        #     Workflow: publish.yml
-        #     Environment: (leave blank)
+        # One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
+        #   PyPI Project Name: sindri-forge
+        #   Owner: 4KMetrics
+        #   Repository name: sindri
+        #   Workflow name: publish.yml
+        #   Environment name: (blank)
