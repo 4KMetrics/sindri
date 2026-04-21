@@ -2,7 +2,7 @@
   "name": "4kmetrics",
   "owner": {
     "name": "4KMetrics",
-    "email": "thisisme.nimesh@gmail.com"
+    "email": "260103116+4kmetrics@users.noreply.github.com"
   },
   "metadata": {
     "description": "Community plugins from 4KMetrics"
@@ -14,7 +14,7 @@
       "description": "Bounded, target-driven optimization loops for any metric you can measure deterministically. Autonomous experiments, kept-or-reverted per git commit, auto-PR on success.",
       "author": {
         "name": "Nimesh Kumar",
-        "email": "thisisme.nimesh@gmail.com"
+        "email": "260103116+4kmetrics@users.noreply.github.com"
       },
       "homepage": "https://github.com/4KMetrics/sindri",
       "repository": "https://github.com/4KMetrics/sindri",

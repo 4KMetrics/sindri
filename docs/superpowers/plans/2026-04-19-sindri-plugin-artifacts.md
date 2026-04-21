@@ -172,7 +172,7 @@ Create `.claude-plugin/plugin.json`:
   "version": "0.2.0",
   "author": {
     "name": "Nimesh Kumar",
-    "email": "thisisme.nimesh@gmail.com"
+    "email": "260103116+4kmetrics@users.noreply.github.com"
   },
   "homepage": "https://github.com/4KMetrics/sindri",
   "license": "MIT"
