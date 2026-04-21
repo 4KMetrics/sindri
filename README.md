@@ -20,8 +20,10 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 Then install the Python runtime once (the plugin calls `python -m sindri`):
 
 ```bash
-uv pip install sindri                                            # or: pip install sindri
+uv pip install sindri-forge                                      # or: pip install sindri-forge
 ```
+
+The PyPI distribution is `sindri-forge` (the `sindri` name was taken by an unrelated ZK-proof SDK). The imported module name is still `sindri`.
 
 Restart Claude Code. Done.
 
