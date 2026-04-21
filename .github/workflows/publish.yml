@@ -1,0 +1,38 @@
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # manual re-trigger for missed releases
+
+jobs:
+  pypi:
+    name: build + publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # required for PyPI trusted publisher (OIDC)
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses PyPI trusted publishing — no API token needed.
+        # One-time setup on PyPI:
+        #   Project settings → Publishing → Add a new publisher
+        #     Repository: 4KMetrics/sindri
+        #     Workflow: publish.yml
+        #     Environment: (leave blank)

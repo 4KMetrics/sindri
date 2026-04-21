@@ -10,7 +10,15 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 
 ## Install
 
-One command:
+### Option 1 — PyPI + symlink (preferred once published)
+
+```bash
+uv pip install sindri                                            # or: pip install sindri
+git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
+ln -sfn ~/src/sindri ~/.claude/plugins/sindri
+```
+
+### Option 2 — local dev install
 
 ```bash
 git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
