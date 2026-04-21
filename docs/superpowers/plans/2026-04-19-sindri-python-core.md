@@ -146,7 +146,7 @@ description = "Claude Code plugin core: bounded, target-driven optimization loop
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "MIT"}
-authors = [{name = "Nimesh Kumar"}]
+authors = [{name = "4KMetrics"}]
 dependencies = [
     "pydantic>=2.0,<3.0",
 ]

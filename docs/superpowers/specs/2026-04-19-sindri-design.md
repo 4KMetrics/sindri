@@ -4,7 +4,7 @@ date: 2026-04-19
 status: draft
 version: 0.1
 authors:
-  - Nimesh Kumar (architect)
+  - 4KMetrics (architect)
   - Claude Opus 4.7 (1M context) (co-author)
 inspirations:
   - https://github.com/karpathy/autoresearch
