@@ -1,0 +1,105 @@
+name: marketplace-bump
+
+# When a release is published (release-please merges the Release PR and tags
+# v<semver>), open a PR against the Anthropic community marketplace bumping
+# Sindri's pinned commit to the released commit — so marketplace users get the
+# new version without a manual edit. Keeps pinning (no moving ref): the pinned
+# commit's plugin.json version always matches a published sindri-forge on PyPI.
+#
+# ONE-TIME SETUP (required — until done, this job no-ops via the `if` guard):
+#   1. Fork anthropics/claude-plugins-community (e.g. to the 4KMetrics org).
+#   2. Create a token for an account that owns the fork:
+#        - classic PAT with scope `repo`, OR
+#        - fine-grained PAT with contents:write on the fork + pull-requests:write.
+#      Add it as an Actions secret: MARKETPLACE_PR_TOKEN.
+#   3. Add an Actions variable MARKETPLACE_FORK = "<owner>/claude-plugins-community"
+#      (the fork's full name).
+#
+# Re-runnable by hand via workflow_dispatch with an explicit tag.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to pin (e.g. v0.4.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Skip entirely until the fork variable is configured.
+    if: ${{ vars.MARKETPLACE_FORK != '' }}
+    env:
+      UPSTREAM: anthropics/claude-plugins-community
+      FORK: ${{ vars.MARKETPLACE_FORK }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ secrets.MARKETPLACE_PR_TOKEN }}
+    steps:
+      - name: Resolve released commit SHA
+        id: rel
+        run: |
+          set -euo pipefail
+          REF=$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq '.object.sha')
+          TYPE=$(gh api "repos/${{ github.repository }}/git/refs/tags/$TAG" --jq '.object.type')
+          if [ "$TYPE" = "tag" ]; then
+            # annotated tag — dereference to the commit it points at
+            REF=$(gh api "repos/${{ github.repository }}/git/tags/$REF" --jq '.object.sha')
+          fi
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved $TAG -> $REF"
+
+      - name: Checkout the marketplace fork
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FORK }}
+          token: ${{ secrets.MARKETPLACE_PR_TOKEN }}
+          path: marketplace
+          fetch-depth: 0
+
+      - name: Branch off latest upstream main
+        working-directory: marketplace
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch upstream main
+          git checkout -B "bump-sindri-$TAG" upstream/main
+
+      - name: Bump only the sindri sha (one-line diff)
+        working-directory: marketplace
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.rel.outputs.sha }}"
+          # Read the sindri entry's current pinned sha, then replace just that
+          # value — a 40-char sha is unique to the sindri block, so this leaves
+          # the rest of the 2k-entry file byte-for-byte unchanged.
+          OLD=$(python3 -c "import json;d=json.load(open('.claude-plugin/marketplace.json'));print(next(p['source']['sha'] for p in d['plugins'] if p['name']=='sindri'))")
+          if [ "$OLD" = "$NEW" ]; then
+            echo "sindri already pinned at $NEW — nothing to do."
+            echo "changed=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sed -i "s/$OLD/$NEW/" .claude-plugin/marketplace.json
+          echo "changed=true" >> "$GITHUB_ENV"
+          git --no-pager diff -- .claude-plugin/marketplace.json
+
+      - name: Commit, push, open PR
+        if: env.changed == 'true'
+        working-directory: marketplace
+        run: |
+          set -euo pipefail
+          git config user.name "sindri-release-bot"
+          git config user.email "sindri-release-bot@users.noreply.github.com"
+          git add .claude-plugin/marketplace.json
+          git commit -m "Bump sindri to $TAG"
+          git push -u origin "bump-sindri-$TAG" --force
+          FORK_OWNER="${FORK%%/*}"
+          gh pr create --repo "$UPSTREAM" \
+            --base main \
+            --head "$FORK_OWNER:bump-sindri-$TAG" \
+            --title "Bump sindri to $TAG" \
+            --body "Pins the \`sindri\` plugin to released tag \`$TAG\` (commit ${{ steps.rel.outputs.sha }}). Automated from 4KMetrics/sindri's release workflow. The pinned commit's \`plugin.json\` version matches the \`sindri-forge\` release on PyPI."
