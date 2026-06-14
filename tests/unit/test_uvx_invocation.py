@@ -14,6 +14,7 @@ MIGRATED = [
     REPO_ROOT / "skills" / "sindri-loop" / "SKILL.md",
     REPO_ROOT / "skills" / "sindri-finalize" / "SKILL.md",
     REPO_ROOT / "skills" / "sindri-scaffold-benchmark" / "SKILL.md",
+    REPO_ROOT / "docs" / "DOGFOOD.md",
 ]
 
 
