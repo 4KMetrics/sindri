@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/4KMetrics/sindri/compare/v0.3.2...v0.4.0) (2026-06-14)
+
+
+### Features
+
+* zero-install UX via uvx (no manual Python setup) ([#16](https://github.com/4KMetrics/sindri/issues/16)) ([2f2db55](https://github.com/4KMetrics/sindri/commit/2f2db55b7c9a4c9d354d1f4dec515ff8fdefbbd4))
+
 ## [0.3.2](https://github.com/4KMetrics/sindri/compare/v0.3.1...v0.3.2) (2026-04-21)
 
 
