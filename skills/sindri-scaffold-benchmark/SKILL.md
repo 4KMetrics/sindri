@@ -12,6 +12,7 @@ Goal: produce `.claude/scripts/sindri/benchmark.py` that, when run, prints one l
 
 - `$METRIC_NAME` — snake_case identifier (e.g., `bundle_bytes`)
 - `$GOAL_TEXT` — the user's original goal statement, for context
+- Resolve `FORGE` to this plugin's `scripts/forge.sh` (this skill lives at `<plugin-root>/skills/sindri-scaffold-benchmark/SKILL.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`). The validation step below uses `"$FORGE"`.
 
 ## 1. Scan the repo
 
@@ -90,7 +91,7 @@ Substitute `<metric_name>` with `$METRIC_NAME` exactly. The `METRIC` line must b
 ## 5. Validate with one real run
 
 ```bash
-python -m sindri validate-benchmark --expected $METRIC_NAME
+"$FORGE" validate-benchmark --expected $METRIC_NAME
 ```
 
 If it fails:

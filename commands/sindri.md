@@ -11,7 +11,7 @@ You are the front-of-house router for sindri. The user's input after `/sindri` i
 
 | First token of `$ARGUMENTS` | Action |
 |---|---|
-| `status` | Run `python -m sindri status` and print its output verbatim. No skill invocation. Zero-cost read. |
+| `status` | Resolve `FORGE` to this plugin's `scripts/forge.sh` (absolute path; the command file lives at `<plugin-root>/commands/sindri.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`). Run `"$FORGE" status` and print its output verbatim. No skill invocation. Fast read (the first-ever call does a one-time backend fetch; subsequent calls are cached). |
 | `stop` | `touch .sindri/current/HALT` (sentinel file — sindri-loop checks for it before every experiment and treats it as `halted_by_user` termination). Print `sindri: halt signal sent. The next wakeup will terminate without running another experiment.` |
 | `scaffold-benchmark` | Invoke skill `sindri-scaffold-benchmark` (no active run required). |
 | `clear` | Destructive. Read the branch name from `.sindri/current/sindri.md` JSON frontmatter **before** deleting anything. Prompt the user for confirmation (`y/N`). If confirmed: `rm -rf .sindri/current/ && git checkout main && git branch -D <branch>`. If not confirmed: print `aborted.` and stop. |

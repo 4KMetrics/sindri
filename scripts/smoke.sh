@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # sindri manual smoke test
-# Runs the full Python-level lifecycle in a disposable temp repo — no Claude, no PR.
+# Runs the full backend lifecycle (through the forge.sh/uvx wrapper, against local
+# source) in a disposable temp repo — no Claude, no PR.
 # This is the "did I break the plumbing" check before pushing.
 #
 # Usage: ./scripts/smoke.sh
@@ -29,32 +30,34 @@ chmod +x .claude/scripts/sindri/benchmark.py
 echo ".sindri/" > .gitignore
 git add -A && git commit -q -m "seed"
 
-export PYTHONPATH="$SINDRI_REPO/src:${PYTHONPATH:-}"
+# Exercise the real uvx launch path, but against THIS working tree (not PyPI).
+export SINDRI_FORGE_SOURCE="$SINDRI_REPO"
+FORGE="$SINDRI_REPO/scripts/forge.sh"
 
 POOL_JSON='[{"id":1,"name":"dummy","expected_impact_pct":-10,"files":[]}]'
 
 echo ">> sindri init"
-python -m sindri init \
+"$FORGE" init \
   --goal "reduce lines by 10%" \
   --pool-json "$POOL_JSON" \
   --script .claude/scripts/sindri/benchmark.py
 
 echo ">> validate-benchmark"
-python -m sindri validate-benchmark
+"$FORGE" validate-benchmark
 
 echo ">> detect-mode"
-echo '{"baseline_samples": [30.0, 30.0, 30.0]}' | python -m sindri detect-mode --script .claude/scripts/sindri/benchmark.py
+echo '{"baseline_samples": [30.0, 30.0, 30.0]}' | "$FORGE" detect-mode --script .claude/scripts/sindri/benchmark.py
 
 echo ">> read-state"
-python -m sindri read-state | python -c "import json, sys; print('  pool size:', len(json.load(sys.stdin).get('pool', [])))"
+"$FORGE" read-state | python3 -c "import json, sys; print('  pool size:', len(json.load(sys.stdin).get('pool', [])))"
 
 echo ">> pick-next"
-python -m sindri pick-next
+"$FORGE" pick-next
 
 echo ">> check-termination"
-echo '{"experiments_run": 0, "consecutive_reverts": 0}' | python -m sindri check-termination
+echo '{"experiments_run": 0, "consecutive_reverts": 0}' | "$FORGE" check-termination
 
 echo ">> status"
-python -m sindri status
+"$FORGE" status
 
 echo ">> OK — plumbing works."

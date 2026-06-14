@@ -6,9 +6,9 @@ A ~15-minute guided walkthrough. Run this once in a throwaway git repo before po
 
 You've completed the [install](../README.md#install). Specifically:
 
-- `python -m sindri --version` prints `sindri <semver>` in the Python environment Claude Code launches processes from. (If it fails here, nothing else will work.)
+- `uv` is installed (`uv --version` works) — sindri runs its backend in an isolated environment via uvx, fetched on demand. You do NOT need a pip-installed Python package. If `uv` is missing, `/sindri` prints a one-line install command and stops.
 - The plugin is symlinked into `~/.claude/plugins/sindri`.
-- You've restarted Claude Code since installing.
+- You've run `/reload-plugins` (or relaunched Claude Code) since installing.
 - `gh auth status` is OK (needed for the finalize step).
 
 ## 1. Create the throwaway repo
@@ -82,8 +82,8 @@ git commit -q -m "chore: add sindri benchmark"
 
 `sindri-start` pre-flight should:
 
-1. Succeed on `python -m sindri --version` (package installed).
-2. Succeed on `python -m sindri status` (no active run).
+1. Succeed on the backend reachability check — `sindri-start` resolves `$FORGE` to the plugin's `scripts/forge.sh` and runs `"$FORGE" --version`. (If `uv` is missing, you'll get a friendly install hint instead.)
+2. Succeed on `"$FORGE" status` (no active run).
 3. Detect `.sindri/` is already in `.gitignore` and move on silently.
 4. See a clean tree and proceed.
 5. Warn only if `gh` isn't authenticated.
@@ -92,7 +92,7 @@ Then it should:
 
 - Parse the goal as `{reduce, lines, 40}`.
 - Scan the repo and propose a pool (likely 3–5 candidates like "delete `src/<file>.py`"). It may be short — the repo is tiny. Accept *"approved"* on whatever it proposes.
-- Call `python -m sindri init` with your approved pool.
+- Call `"$FORGE" init` with your approved pool.
 - Create branch `sindri/reduce-lines-40pct`.
 - Print the "run started" summary with a baseline of 50 and a target of 30.
 - `ScheduleWakeup` to trigger the orchestrator in ~60s.
@@ -132,16 +132,16 @@ Two ways to terminate:
 
 Finalize should:
 
-1. Run `python -m sindri generate-pr-body` into `.sindri/current/pr-body.md`.
+1. Run `"$FORGE" generate-pr-body` into `.sindri/current/pr-body.md`.
 2. `git push -u origin sindri/reduce-lines-40pct` (halts here cleanly if no remote — expected for the no-remote path).
 3. `gh pr create ...` (requires the remote + `gh` auth).
 4. Print the PR URL.
-5. Run `python -m sindri archive` — `.sindri/current/` moves to `.sindri/archive/<date>-<slug>/`.
+5. Run `"$FORGE" archive` — `.sindri/current/` moves to `.sindri/archive/<date>-<slug>/`.
 
 **Watch for:**
 
 - PR title should have the **actual** observed delta, not the target.
-- After archive, `python -m sindri status` should report "no active run" — a fresh `/sindri <goal>` should now be permitted.
+- After archive, `"$FORGE" status` (or `/sindri status`) should report "no active run" — a fresh `/sindri <goal>` should now be permitted.
 
 ## 8. Clean up
 

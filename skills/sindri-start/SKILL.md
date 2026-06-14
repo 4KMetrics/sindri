@@ -10,8 +10,9 @@ You are the interactive scaffolder. Your job is to go from *"user typed a goal"*
 
 ## Pre-flight (fail fast)
 
-1. **Python package available.** Run `python -m sindri --version`. If it fails with `No module named sindri` (or similar), STOP — print: *"The `sindri` Python package isn't installed in the current Python environment. From the plugin directory (`~/.claude/plugins/sindri`) run `./scripts/install-plugin.sh`, or `uv pip install sindri` once it's published to PyPI. Then re-run `/sindri`."* Do not proceed.
-2. **No active run.** Run `python -m sindri status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri` (orchestrator will resume), or abandon with `/sindri clear` and start fresh."* Do not proceed.
+0. **Resolve the backend launcher.** Set `FORGE` to the absolute path of this plugin's `scripts/forge.sh` (this skill lives at `<plugin-root>/skills/sindri-start/SKILL.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`). Every backend call below uses `"$FORGE" <cmd>`.
+1. **Backend reachable.** Run `"$FORGE" --version`. If it prints the `uv`-missing guidance (no `uv` on PATH), relay that message verbatim and STOP — the user must install `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and re-run `/sindri`. Do not proceed.
+2. **No active run.** Run `"$FORGE" status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri` (orchestrator will resume), or abandon with `/sindri clear` and start fresh."* Do not proceed.
 3. **`.sindri/` is gitignored.** Check `.gitignore` for a line matching `.sindri/` (or `.sindri`, or `.sindri/**`). If missing:
    - If `.gitignore` exists, offer: *"Sindri writes run state to `.sindri/` (on-disk singleton). That directory must be gitignored so it doesn't get committed into the optimization branch. I'll add `.sindri/` to `.gitignore` now — OK?"* On yes, append `.sindri/\n` to `.gitignore`, stage + commit with message `chore: gitignore .sindri/ (sindri state dir)`.
    - If `.gitignore` does NOT exist, create it with `.sindri/\n` and commit the same way.
@@ -42,7 +43,7 @@ If you can't parse it confidently, print **three concrete examples** and ask the
 Check `.claude/scripts/sindri/benchmark.py`:
 
 - **Missing** → invoke skill `sindri-scaffold-benchmark` as a sub-flow, passing the parsed `metric_name` and goal text. Wait for it to complete. Do not proceed until the file exists.
-- **Exists** → run `python -m sindri validate-benchmark --expected <metric_name>`. If it fails (non-zero exit, no `METRIC <metric_name>=<number>` line, or wrong metric name), print the error and invoke `sindri-scaffold-benchmark` in *repair* mode.
+- **Exists** → run `"$FORGE" validate-benchmark --expected <metric_name>`. If it fails (non-zero exit, no `METRIC <metric_name>=<number>` line, or wrong metric name), print the error and invoke `sindri-scaffold-benchmark` in *repair* mode.
 
 ## 3. Scan for candidates
 
@@ -95,7 +96,7 @@ Serialize the approved pool to a JSON array:
 Then run (using the **normalized** goal string, always in `reduce|increase <metric> by <N>%` form — never the raw user input):
 
 ```bash
-python -m sindri init \
+"$FORGE" init \
   --goal "<normalized goal — e.g. 'reduce bundle_bytes by 15%'>" \
   --pool-json "$POOL_JSON" \
   --script .claude/scripts/sindri/benchmark.py

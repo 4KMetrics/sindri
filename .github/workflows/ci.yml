@@ -26,6 +26,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Install uv (backend is fetched via uvx in e2e + smoke)
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify uv is on PATH (fail fast if install broke)
+        run: uv --version
+
       - name: Configure git (required for git_ops + e2e)
         run: |
           git config --global user.email "ci@sindri.local"

@@ -6,7 +6,7 @@ tools: Bash, Read, Edit, Task
 
 # sindri-loop — per-wakeup orchestrator
 
-You run **once per wakeup**. One invocation = one experiment end-to-end. You are deliberately thin: every deterministic step goes through `python -m sindri <cmd>`, every reasoning step goes to a fresh subagent via `Task`. Your own context stays tiny so autocompaction is a non-issue.
+You run **once per wakeup**. One invocation = one experiment end-to-end. You are deliberately thin: every deterministic step goes through the backend wrapper `"$FORGE" <cmd>` (resolve `FORGE` to this plugin's `scripts/forge.sh` — the skill lives at `<plugin-root>/skills/sindri-loop/SKILL.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`), every reasoning step goes to a fresh subagent via `Task`. Your own context stays tiny so autocompaction is a non-issue.
 
 **Invariant: every wakeup is identical in structure.** No state persists in your head — it all lives on disk.
 
@@ -15,7 +15,7 @@ You run **once per wakeup**. One invocation = one experiment end-to-end. You are
 ### 1. Read state
 
 ```bash
-python -m sindri read-state
+"$FORGE" read-state
 ```
 
 Parse the JSON. It includes: `pool`, `baseline`, `current_best`, `branch`, `mode`, `guardrails`, `started_at`.
@@ -47,7 +47,7 @@ Otherwise, compute counters from state + jsonl:
 Pipe these to `check-termination` on stdin:
 
 ```bash
-echo '{"experiments_run": <N>, "consecutive_reverts": <K>}' | python -m sindri check-termination
+echo '{"experiments_run": <N>, "consecutive_reverts": <K>}' | "$FORGE" check-termination
 ```
 
 Returns JSON: `{"terminated": bool, "reason": str | null, "auto_finalize": bool}`.
@@ -79,7 +79,7 @@ This is a belt-and-suspenders recovery — kept commits survive (they're in HEAD
 ### 4. Pick next candidate
 
 ```bash
-python -m sindri pick-next
+"$FORGE" pick-next
 ```
 
 Returns JSON describing the next candidate: `{"id": int, "name": str, "expected_impact_pct": float, "status": "pending", "files": [...], "notes": null}`. If `null`, re-run step 2 — state should already have told you the pool is empty, so this path is defensive.
@@ -154,7 +154,7 @@ Compose the RecordPayload and pipe to `record-result`:
 ```
 
 ```bash
-echo "$PAYLOAD" | python -m sindri record-result
+echo "$PAYLOAD" | "$FORGE" record-result
 ```
 
 `record-result` atomically:
@@ -171,7 +171,7 @@ If record-result exits non-zero, surface the stderr and halt — writing state i
 Re-compute `experiments_run` and `consecutive_reverts` (now including this experiment) and re-pipe them into `check-termination`:
 
 ```bash
-echo '{"experiments_run": <N+1>, "consecutive_reverts": <updated K>}' | python -m sindri check-termination
+echo '{"experiments_run": <N+1>, "consecutive_reverts": <updated K>}' | "$FORGE" check-termination
 ```
 
 Structural halts may now fire:

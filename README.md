@@ -10,55 +10,31 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 
 ## Install
 
-### Option 1 — Official Anthropic marketplace (once approved + PyPI live)
-
-Pending Anthropic review via [platform.claude.com/plugins/submit](https://platform.claude.com/plugins/submit). Once approved AND `sindri-forge` is published on PyPI:
-
-```
-/plugin install sindri@claude-plugins-official
-uv pip install sindri-forge
+```text
+/plugin install sindri@claude-community
+/reload-plugins            # or relaunch Claude Code; commands are then live
 ```
 
-Restart Claude Code. Done.
+Then, in any repo you want to optimize:
 
-### Option 2 — Community marketplace (works today, once PyPI is live)
-
-No Anthropic review required — the plugin is served directly from this repo's `.claude-plugin/marketplace.json`:
-
-```
-/plugin marketplace add 4KMetrics/sindri
-/plugin install sindri@4kmetrics
-uv pip install sindri-forge
+```text
+/sindri reduce bundle_bytes by 15%
 ```
 
-The PyPI distribution is `sindri-forge` (the `sindri` name was taken by an unrelated ZK-proof SDK). The imported module name is still `sindri`.
+That's it. No `pip install`, no virtualenv. The Python backend (`sindri-forge`)
+is fetched on demand by [`uv`](https://docs.astral.sh/uv/). If `uv` isn't
+installed, `/sindri` prints a one-line install command and stops.
 
-Restart Claude Code.
-
-### Option 3 — local dev install (no marketplace, no PyPI dependency)
-
-```bash
-git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
-cd ~/src/sindri && ./scripts/install-plugin.sh
-```
-
-The install script handles the Python package + the `~/.claude/plugins/sindri` symlink in one go.
-
-That script installs the `sindri` Python package into your active environment and symlinks the plugin into `~/.claude/plugins/sindri`. Restart Claude Code afterward. Verify: `/sindri status` should report "no active run" cleanly.
-
-To target a specific Python (e.g. a venv), pass it via env var:
-
-```bash
-SINDRI_PYTHON=/path/to/venv/bin/python ./scripts/install-plugin.sh
-```
+> Sindri is published in the Anthropic community marketplace
+> (`anthropics/claude-plugins-community`). If you haven't added it yet:
+> `/plugin marketplace add anthropics/claude-plugins-community`.
 
 Requirements:
 
-- Python ≥ 3.10 (pydantic 2 is the only runtime dep; pyyaml is dev-only)
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — runs the backend in an isolated environment
 - `git` ≥ 2.30
 - `gh` CLI (authenticated) — needed only for `sindri-finalize` PR creation
-- Claude Code CLI with `Task` + `ScheduleWakeup` tools
-- `uv` (optional, faster install) or `pip`
+- Claude Code with `Task` + `ScheduleWakeup` tools
 
 **First-run dogfood:** walk through [`docs/DOGFOOD.md`](docs/DOGFOOD.md) on a throwaway repo before pointing sindri at real code — it verifies every skill path and catches environment gaps before you commit an overnight run.
 
@@ -96,6 +72,20 @@ pytest                                            # all test layers
 pytest -m "not e2e" -q                            # skip the slow end-to-end loop test
 pytest tests/unit/test_plugin_artifacts.py -v     # just artifact validity checks
 ./scripts/smoke.sh                                # plumbing smoke in a throwaway repo
+```
+
+### Local plugin install (contributors)
+
+```bash
+git clone https://github.com/4KMetrics/sindri.git ~/src/sindri
+cd ~/src/sindri && ./scripts/install-plugin.sh   # symlinks the plugin only
+```
+
+To test local backend edits (instead of the published package), point the
+launcher at your checkout before running `/sindri`:
+
+```bash
+export SINDRI_FORGE_SOURCE="$(pwd)"
 ```
 
 ## License
