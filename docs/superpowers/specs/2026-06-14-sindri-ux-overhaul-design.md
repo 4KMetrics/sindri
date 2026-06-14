@@ -78,14 +78,21 @@ Rationale:
 - **No manual multi-site edits.** The version is resolved once, not hardcoded at 15 sites.
 - **Simplest mental model:** the plugin and its backend are the same version.
 
-The skills resolve the version by reading `plugin.json` (the plugin root is discoverable
-from the skill's own location). The resolved value populates the `sindri-forge==<version>`
-default in the `SINDRI_FORGE_SOURCE` expression.
+Version resolution is handled by a self-locating wrapper script (`scripts/forge.sh`, see
+§3), **not** an environment variable: `CLAUDE_PLUGIN_ROOT` is documented for hooks only and
+is not guaranteed in skill-invoked Bash. The wrapper finds itself via `BASH_SOURCE`, reads
+`.claude-plugin/plugin.json` relative to its own path (with `grep`/`sed`, no Python
+dependency, since `uv` may be bootstrapping Python), and uses the result as the
+`sindri-forge==<version>` default. Skills invoke the wrapper by absolute path, which Claude
+fills in from the skill's known base directory.
 
 ### 3. Local-dev escape hatch
 
-- `SINDRI_FORGE_SOURCE` env var overrides the pinned source. A contributor exports
-  `SINDRI_FORGE_SOURCE=.` (or an absolute path) so `uvx --from .` builds from local
+- `SINDRI_FORGE_SOURCE` env var overrides the pinned source. It takes an **explicit path
+  or package spec** (e.g. the sindri repo root), **not** a bare `.` — `uvx --from .`
+  resolves against the current working directory, which during a run is the user's target
+  repo, not the sindri checkout. A contributor exports
+  `SINDRI_FORGE_SOURCE="$(pwd)"` from their sindri checkout so uvx builds from local
   Python source — preserving the edit-test loop without stale published code.
 - `scripts/install-plugin.sh` is slimmed to **symlink the plugin only**. All pip/venv
   manipulation is removed. Contributors who want to test backend edits set
@@ -143,9 +150,10 @@ The `commands/sindri.md` `status` route description is updated to acknowledge th
 
 ## Testing
 
-- `scripts/smoke.sh` runs end-to-end against `uvx --from sindri-forge==<version> python -m
-  sindri …` in a throwaway repo and must pass (this is the primary integration check for
-  the invocation change).
+- `scripts/smoke.sh` runs end-to-end through the wrapper with
+  `SINDRI_FORGE_SOURCE="$SINDRI_REPO"` in a throwaway repo and must pass. It is a pre-push
+  "did I break the plumbing" check, so it exercises the real uvx launch path against the
+  **local working tree**, not the published package.
 - A `uv`-missing simulation (temporarily shadow `uv` off PATH) must produce the friendly
   message from §4, not a traceback.
 - `SINDRI_FORGE_SOURCE=.` must cause uvx to build from local source (verify a deliberate
