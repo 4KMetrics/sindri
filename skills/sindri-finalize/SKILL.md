@@ -8,12 +8,14 @@ tools: Bash, Read
 
 You are the last skill in the lifecycle. You run only when the orchestrator has cleanly terminated AND at least one experiment was kept. Your job is fast (<30s), linear, and has no user interaction.
 
+Resolve `FORGE` to this plugin's `scripts/forge.sh` (this skill lives at `<plugin-root>/skills/sindri-finalize/SKILL.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`). Backend calls below use `"$FORGE" <cmd>`.
+
 ## Steps
 
 ### 1. Generate the PR body
 
 ```bash
-python -m sindri generate-pr-body > .sindri/current/pr-body.md
+"$FORGE" generate-pr-body > .sindri/current/pr-body.md
 ```
 
 The Python core renders the body from `sindri.md` frontmatter + `sindri.jsonl` history — goal, baseline → final, per-commit table, dead-ends, summary stats.
@@ -78,7 +80,7 @@ Run archived: .sindri/archive/<date>-<slug>/
 ### 6. Archive the run
 
 ```bash
-python -m sindri archive
+"$FORGE" archive
 ```
 
 This moves `.sindri/current/` → `.sindri/archive/<YYYY-MM-DD>-<goal-slug>/`. After this, a fresh `/sindri <goal>` is permitted.
