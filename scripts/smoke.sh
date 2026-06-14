@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # sindri manual smoke test
-# Runs the full Python-level lifecycle in a disposable temp repo — no Claude, no PR.
+# Runs the full backend lifecycle (through the forge.sh/uvx wrapper, against local
+# source) in a disposable temp repo — no Claude, no PR.
 # This is the "did I break the plumbing" check before pushing.
 #
 # Usage: ./scripts/smoke.sh

@@ -61,6 +61,65 @@ def test_friendly_message_when_uv_missing():
     assert "Traceback" not in r.stderr
 
 
+def _fake_uv_dir(tmp_path: Path) -> Path:
+    """Create a dir with fake `uv` and `uvx` executables that exit 0 silently.
+
+    forge.sh only checks `command -v uv` for presence, but the actual backend
+    call is `uvx --from ... python -m sindri ...`. Both must exist on PATH for
+    the wrapper to reach (and complete) the warmed-marker logic without network.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name in ("uv", "uvx"):
+        exe = bindir / name
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+    return bindir
+
+
+def test_first_run_notice_then_suppressed(tmp_path):
+    bindir = _fake_uv_dir(tmp_path)
+    cache = tmp_path / "cache"
+    home = tmp_path / "home"
+    cache.mkdir()
+    home.mkdir()
+    # No SINDRI_FORGE_SOURCE here: the notice/warmed-marker path only runs for
+    # the pinned package. (It is not set in the ambient test environment.)
+    env = {
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "XDG_CACHE_HOME": str(cache),
+        "HOME": str(home),
+    }
+
+    first = _run(["read-state"], env=env)
+    assert first.returncode == 0
+    assert "Fetching sindri backend (first run only)" in first.stderr
+
+    warmed = cache / "sindri" / f"warmed-{_plugin_version()}"
+    assert warmed.exists(), f"expected warmed marker at {warmed}"
+
+    second = _run(["read-state"], env=env)
+    assert second.returncode == 0
+    assert "Fetching sindri backend (first run only)" not in second.stderr
+
+
+def test_no_notice_when_source_override_set(tmp_path):
+    bindir = _fake_uv_dir(tmp_path)
+    cache = tmp_path / "cache"
+    home = tmp_path / "home"
+    cache.mkdir()
+    home.mkdir()
+    env = {
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "XDG_CACHE_HOME": str(cache),
+        "HOME": str(home),
+        "SINDRI_FORGE_SOURCE": str(tmp_path / "some-local-source"),
+    }
+    r = _run(["read-state"], env=env)
+    assert r.returncode == 0
+    assert "Fetching sindri backend" not in r.stderr
+
+
 @pytest.mark.e2e
 def test_runs_backend_against_local_source():
     if shutil.which("uv") is None:
