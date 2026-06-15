@@ -1,6 +1,6 @@
 ---
 name: sindri-start
-description: Interactive, one-shot scaffolding for a new sindri optimization run. Parses goal, ensures benchmark.py exists, scans repo for candidates, gets pool approval, calls sindri init (which creates the branch, runs baseline, seeds state), and schedules the orchestrator. Use when the /sindri slash command receives a new goal statement.
+description: Interactive, one-shot scaffolding for a new sindri optimization run. Parses goal, ensures benchmark.py exists, scans repo for candidates, gets pool approval, calls sindri init (which creates the branch, runs baseline, seeds state), and schedules the orchestrator. Use when the /sindri:forge command receives a new goal statement.
 tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
@@ -11,8 +11,8 @@ You are the interactive scaffolder. Your job is to go from *"user typed a goal"*
 ## Pre-flight (fail fast)
 
 0. **Resolve the backend launcher.** Set `FORGE` to the absolute path of this plugin's `scripts/forge.sh` (this skill lives at `<plugin-root>/skills/sindri-start/SKILL.md`, so the wrapper is `<plugin-root>/scripts/forge.sh`). Every backend call below uses `"$FORGE" <cmd>`.
-1. **Backend reachable.** Run `"$FORGE" --version`. If it prints the `uv`-missing guidance (no `uv` on PATH), relay that message verbatim and STOP — the user must install `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and re-run `/sindri`. Do not proceed.
-2. **No active run.** Run `"$FORGE" status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri` (orchestrator will resume), or abandon with `/sindri clear` and start fresh."* Do not proceed.
+1. **Backend reachable.** Run `"$FORGE" --version`. If it prints the `uv`-missing guidance (no `uv` on PATH), relay that message verbatim and STOP — the user must install `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and re-run `/sindri:forge`. Do not proceed.
+2. **No active run.** Run `"$FORGE" status`. If it reports an active run, STOP — print the current run's goal and ask: *"There's already an active run for `<existing goal>`. Continue it with `/sindri:forge` (orchestrator will resume), or abandon with `/sindri:clear` and start fresh."* Do not proceed.
 3. **`.sindri/` is gitignored.** Check `.gitignore` for a line matching `.sindri/` (or `.sindri`, or `.sindri/**`). If missing:
    - If `.gitignore` exists, offer: *"Sindri writes run state to `.sindri/` (on-disk singleton). That directory must be gitignored so it doesn't get committed into the optimization branch. I'll add `.sindri/` to `.gitignore` now — OK?"* On yes, append `.sindri/\n` to `.gitignore`, stage + commit with message `chore: gitignore .sindri/ (sindri state dir)`.
    - If `.gitignore` does NOT exist, create it with `.sindri/\n` and commit the same way.
@@ -22,7 +22,7 @@ You are the interactive scaffolder. Your job is to go from *"user typed a goal"*
 
 ## 1. Parse the goal
 
-Parse `$GOAL_STATEMENT` (the argument after `/sindri`) into three fields:
+Parse `$GOAL_STATEMENT` (the argument after `/sindri:forge`) into three fields:
 
 - `metric_name` — snake_case identifier (e.g., `bundle_bytes`, `ci_seconds`, `p95_latency_ms`)
 - `direction` — `reduce` or `increase`
@@ -111,7 +111,7 @@ Then run (using the **normalized** goal string, always in `reduce|increase <metr
 - Auto-detects mode (`local` vs `remote`) from script content + observed CV.
 - Returns JSON: `{"ok": true, "branch": "...", "baseline": ..., "noise_floor": ..., "mode": "..."}`.
 
-If init fails (branch exists, benchmark emits no METRIC line, benchmark crashes): surface the stderr verbatim and halt. The user must resolve before `/sindri` can proceed.
+If init fails (branch exists, benchmark emits no METRIC line, benchmark crashes): surface the stderr verbatim and halt. The user must resolve before `/sindri:forge` can proceed.
 
 ## 6. Schedule the orchestrator
 
@@ -133,7 +133,7 @@ Print a concise summary:
 > *Branch: sindri/reduce-bundle-bytes-15pct*
 > *Mode: local*
 > *Pool: 18 candidates approved*
-> *Orchestrator wakes in 60s. Check in with `/sindri status`. Halt with `/sindri stop`."*
+> *Orchestrator wakes in 60s. Check in with `/sindri:status`. Halt with `/sindri:stop`."*
 
 You are done. Control returns to the slash command, which returns to the user. The orchestrator (sindri-loop) takes over on the next wakeup.
 

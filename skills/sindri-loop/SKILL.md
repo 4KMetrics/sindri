@@ -1,6 +1,6 @@
 ---
 name: sindri-loop
-description: The sindri orchestrator. Runs one experiment per invocation. Reads state, checks the HALT sentinel and termination predicates, picks next candidate, dispatches an experiment subagent via the Task tool, acts on the result (commit or reset), records to state, and schedules the next wakeup — unless terminated. Invoked automatically via ScheduleWakeup during an active run. Never invoke manually.
+description: The sindri orchestrator. Runs one experiment per invocation. Reads state, checks the HALT sentinel and termination predicates, picks next candidate, dispatches an experiment subagent via the Task tool, acts on the result (commit or reset), records to state, and schedules the next wakeup — unless terminated. Invoked automatically via ScheduleWakeup during an active run. A single manual tick is available via /sindri:loop (advanced/debug); otherwise do not invoke directly.
 tools: Bash, Read, Edit, Task
 ---
 
@@ -26,7 +26,7 @@ Before anything else, check for the user-halt sentinel:
 
 ```bash
 if [ -f .sindri/current/HALT ]; then
-  # User invoked /sindri stop. Terminate with reason halted_by_user.
+  # User invoked /sindri:stop. Terminate with reason halted_by_user.
   # auto_finalize is true iff at least one kept commit exists.
 fi
 ```
@@ -58,7 +58,7 @@ If `terminated`:
 2. If `auto_finalize` is `true` AND `kept >= 1`, invoke skill `sindri-finalize`.
 3. Otherwise print a human-readable summary:
    - `reason == "pool_empty"` + kept == 0 → *"sindri: terminated (pool exhausted). 0 kept experiments out of <N> tried. No PR created. See `.sindri/current/`."*
-   - Structural halts (`max_reverts_in_a_row`, `max_experiments`) → surface the halt reason and tell the user: *"State preserved in `.sindri/current/`. Fix the underlying issue and re-run `/sindri`, or `/sindri clear` to abandon."*
+   - Structural halts (`max_reverts_in_a_row`, `max_experiments`) → surface the halt reason and tell the user: *"State preserved in `.sindri/current/`. Fix the underlying issue and re-run `/sindri:forge`, or `/sindri:clear` to abandon."*
 4. **Do NOT call ScheduleWakeup.** The loop ends here.
 5. Return.
 
@@ -190,6 +190,8 @@ ScheduleWakeup(
   prompt="Resume sindri-loop orchestrator. Read state from .sindri/current/ and run one wakeup cycle."
 )
 ```
+
+`ScheduleWakeup` runs only on this autonomous path. A manual `/sindri:loop` tick runs steps 1–9 and **stops before this step**, so it never creates a wakeup competing with the already-pending auto-loop.
 
 Return. You are done. The next wakeup starts fresh at step 1.
 

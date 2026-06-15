@@ -1,6 +1,6 @@
 ---
 name: sindri-finalize
-description: Auto-invoked by sindri-loop on clean termination with ≥1 kept commit. Generates the PR body, pushes the branch, opens a PR via gh, surfaces the URL, and archives the current run. Never invoke manually.
+description: Auto-invoked by sindri-loop on clean termination with ≥1 kept commit. Generates the PR body, pushes the branch, opens a PR via gh, surfaces the URL, and archives the current run. A manual /sindri:finalize (advanced/debug) can force a PR from current kept commits; otherwise do not invoke directly.
 tools: Bash, Read
 ---
 
@@ -30,7 +30,7 @@ git push -u origin "<branch>"
 
 If push fails (auth expired, remote missing, branch already on remote with divergent history):
 
-- Print: *"sindri: HALTED during finalize. `git push` failed — <stderr>. State preserved. Re-run `/sindri` after fixing, and it will retry finalize from the same state."*
+- Print: *"sindri: HALTED during finalize. `git push` failed — <stderr>. State preserved. Re-run `/sindri:finalize` after fixing, and it will retry from the same state."*
 - STOP. Do not retry destructively. Do not delete or rewrite history.
 
 ### 3. Compose the PR title
@@ -83,11 +83,11 @@ Run archived: .sindri/archive/<date>-<slug>/
 "$FORGE" archive
 ```
 
-This moves `.sindri/current/` → `.sindri/archive/<YYYY-MM-DD>-<goal-slug>/`. After this, a fresh `/sindri <goal>` is permitted.
+This moves `.sindri/current/` → `.sindri/archive/<YYYY-MM-DD>-<goal-slug>/`. After this, a fresh `/sindri:forge <goal>` is permitted.
 
 ## Anti-patterns
 
 - **Never retry `git push` with `--force`.** Force-pushing a sindri branch destroys the history sindri wrote; the PR body would become inconsistent with origin.
 - **Never amend or rewrite kept commits.** Each kept commit is part of the audit log. `git rebase -i` is off-limits in this skill.
 - **Never archive before push + PR succeed.** Archive is the last step; it implies "this run is shippable and shipped."
-- **Never delete the local branch.** The user may want to check it out. `/sindri clear` is the only path to branch deletion.
+- **Never delete the local branch.** The user may want to check it out. `/sindri:clear` is the only path to branch deletion.

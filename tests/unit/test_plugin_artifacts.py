@@ -74,25 +74,47 @@ class TestMarketplaceManifest:
         assert isinstance(src, (str, dict))
 
 
-class TestSlashCommand:
-    COMMAND_PATH = REPO_ROOT / "commands" / "sindri.md"
+class TestSlashCommands:
+    COMMANDS_DIR = REPO_ROOT / "commands"
+    COMMAND_NAMES = ("forge", "status", "stop", "clear", "setup", "loop", "finalize", "help")
+    SKILL_NAMES = ("sindri-start", "sindri-loop", "sindri-finalize", "sindri-scaffold-benchmark")
+    # skill-dispatching commands -> the skill each must name in its body
+    DISPATCH = {
+        "forge": "sindri-start",
+        "setup": "sindri-scaffold-benchmark",
+        "loop": "sindri-loop",
+        "finalize": "sindri-finalize",
+    }
+    # inline commands carry their own logic and must not name any skill
+    INLINE = ("status", "stop", "clear", "help")
 
-    def test_command_file_exists(self) -> None:
-        assert self.COMMAND_PATH.is_file()
+    def _path(self, name: str) -> Path:
+        return self.COMMANDS_DIR / f"{name}.md"
 
-    def test_command_frontmatter_has_description(self) -> None:
-        fm = _parse_frontmatter(self.COMMAND_PATH)
-        assert "description" in fm and fm["description"].strip(), "command needs a description"
+    def test_router_removed(self) -> None:
+        assert not (self.COMMANDS_DIR / "sindri.md").exists(), "the /sindri:sindri router must be gone"
 
-    def test_command_mentions_subcommands(self) -> None:
-        body = self.COMMAND_PATH.read_text()
-        for sub in ("status", "stop", "scaffold-benchmark", "clear"):
-            assert sub in body, f"command body should reference subcommand: {sub}"
+    def test_each_command_exists_with_description(self) -> None:
+        for name in self.COMMAND_NAMES:
+            p = self._path(name)
+            assert p.is_file(), f"missing command file: commands/{name}.md"
+            fm = _parse_frontmatter(p)
+            assert fm.get("description", "").strip(), f"commands/{name}.md needs a description"
 
-    def test_command_routes_to_skills(self) -> None:
-        body = self.COMMAND_PATH.read_text()
-        for skill in ("sindri-start", "sindri-loop", "sindri-finalize", "sindri-scaffold-benchmark"):
-            assert skill in body, f"command body should name skill: {skill}"
+    def test_wrappers_dispatch_to_their_skill(self) -> None:
+        for cmd, skill in self.DISPATCH.items():
+            body = self._path(cmd).read_text()
+            assert skill in body, f"commands/{cmd}.md should name skill: {skill}"
+
+    def test_status_calls_backend(self) -> None:
+        body = self._path("status").read_text()
+        assert '"$FORGE" status' in body, 'commands/status.md must call "$FORGE" status'
+
+    def test_inline_commands_name_no_skills(self) -> None:
+        for name in self.INLINE:
+            body = self._path(name).read_text()
+            for skill in self.SKILL_NAMES:
+                assert skill not in body, f"commands/{name}.md should not name skill: {skill}"
 
 
 class TestSkillSindriStart:

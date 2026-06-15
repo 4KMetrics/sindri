@@ -6,7 +6,7 @@ A ~15-minute guided walkthrough. Run this once in a throwaway git repo before po
 
 You've completed the [install](../README.md#install). Specifically:
 
-- `uv` is installed (`uv --version` works) — sindri runs its backend in an isolated environment via uvx, fetched on demand. You do NOT need a pip-installed Python package. If `uv` is missing, `/sindri` prints a one-line install command and stops.
+- `uv` is installed (`uv --version` works) — sindri runs its backend in an isolated environment via uvx, fetched on demand. You do NOT need a pip-installed Python package. If `uv` is missing, `/sindri:forge` prints a one-line install command and stops.
 - The plugin is symlinked into `~/.claude/plugins/sindri`.
 - You've run `/reload-plugins` (or relaunched Claude Code) since installing.
 - `gh auth status` is OK (needed for the finalize step).
@@ -51,7 +51,7 @@ You want Claude Code to see `/tmp/sindri-dogfood` as its cwd so sindri's file pa
 ## 4. Scaffold the benchmark
 
 ```
-/sindri scaffold-benchmark
+/sindri:setup
 ```
 
 Walk through the `sindri-scaffold-benchmark` skill. When it asks how to measure, reply in natural language:
@@ -77,7 +77,7 @@ git commit -q -m "chore: add sindri benchmark"
 ## 5. Start an actual run
 
 ```
-/sindri reduce lines by 40%
+/sindri:forge reduce lines by 40%
 ```
 
 `sindri-start` pre-flight should:
@@ -107,7 +107,7 @@ Then it should:
 
 If you wait ~60s, the orchestrator wakeup fires and dispatches the first experiment subagent. It'll apply a candidate (likely deleting a source file), run the benchmark, and return JSON. The orchestrator commits or reverts.
 
-If you don't want to wait, run `/sindri status` every minute. You should see kept/reverted counts increment.
+If you don't want to wait, run `/sindri:status` every minute. You should see kept/reverted counts increment.
 
 Inspect state files any time:
 
@@ -128,7 +128,9 @@ git log --oneline sindri/reduce-lines-40pct   # kept commits
 Two ways to terminate:
 
 - **Natural:** wait for the target (metric ≤ 30) or pool exhaustion. If ≥1 kept commit, sindri-finalize auto-fires on the next wakeup.
-- **Manual halt:** `/sindri stop` — touches `.sindri/current/HALT`. The next wakeup terminates with reason `halted_by_user`; finalize fires only if at least one kept commit exists.
+- **Manual halt:** `/sindri:stop` — touches `.sindri/current/HALT`. The next wakeup terminates with reason `halted_by_user`; finalize fires only if at least one kept commit exists.
+
+> Advanced/debug: `/sindri:finalize` forces a push + PR from the current kept commits, and `/sindri:loop` runs one orchestrator tick by hand. You rarely need either — the loop and finalize are automatic.
 
 Finalize should:
 
@@ -141,7 +143,7 @@ Finalize should:
 **Watch for:**
 
 - PR title should have the **actual** observed delta, not the target.
-- After archive, `"$FORGE" status` (or `/sindri status`) should report "no active run" — a fresh `/sindri <goal>` should now be permitted.
+- After archive, `"$FORGE" status` (or `/sindri:status`) should report "no active run" — a fresh `/sindri:forge <goal>` should now be permitted.
 
 ## 8. Clean up
 

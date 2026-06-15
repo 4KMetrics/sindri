@@ -38,7 +38,7 @@ fi
 if ! command -v uv >/dev/null 2>&1; then
   cat >&2 <<'MSG'
 sindri needs `uv` (it runs the backend in an isolated environment).
-Install it, then re-run /sindri:
+Install it, then re-run your sindri command (e.g. /sindri:forge):
   curl -LsSf https://astral.sh/uv/install.sh | sh
 MSG
   exit 1
