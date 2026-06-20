@@ -122,12 +122,16 @@ entry**, keyed on *"does a `type==experiment` record with this candidate id alre
 - **The key is the JsonlExperiment record by candidate id** (a stable int, `validators.py:50`) — **not**
   `git log --grep`. Keying on git double-counts in the append-then-write window that `cli.py:279-280`
   exists to protect (this was the latent bug the adversarial pass caught in the obvious approaches).
-- If `git log` is consulted at all, it is only to confirm the commit physically landed, anchored
-  exact-subject with `--fixed-strings` (names allow dots/parens/dashes/colons/%).
-- **Unrecoverable on a crashed keep:** `metric_after` / `delta` / `confidence_ratio` were lost with the
-  crashed subagent. `delta` is parseable from the commit subject (`Δ…`); the rest are unknown. Decision:
-  mark the recovered record **partial/recovered** and leave the unknown metrics null — do **not**
-  synthesize fake metric values into the audit log.
+- `git log` confirms a keep commit physically landed (D4 tier b), **anchored on the subject** with a
+  `^kept: <name> (Δ` regex over `git log --format=%s` (NOT `--grep`/`--fixed-strings`, which matched
+  the body and false-positived on prefix-named candidates — caught by the commit-kept review). Keying
+  for *counting* still uses the jsonl record by id, never git.
+- **As-built recovery records the re-run's live metrics — not null.** In this architecture a crashed
+  keep leaves the candidate `pending`, so the next wakeup re-picks it and **re-dispatches the
+  experiment** — the recovered record carries that fresh subagent's real `metric_after`/`delta`/
+  `confidence_ratio`. tier b only reuses the already-landed commit's SHA (the change is identical, so
+  re-committing would be empty); it does not synthesize or null metrics. (This supersedes the session's
+  "leave metrics null" note, which assumed no re-run.)
 - A durable `in_progress` *status literal* (touching every `status==` site) is **not** taken — it's only
   required if D1 had stayed A.
 

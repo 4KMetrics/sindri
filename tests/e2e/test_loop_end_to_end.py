@@ -64,6 +64,20 @@ def _current_metric_before(repo: Path) -> float:
     return float(cb) if cb is not None else float(state["baseline"]["value"])
 
 
+def _apply_result(repo: Path, cand: dict, result: dict, metric_before: float) -> subprocess.CompletedProcess:
+    """Apply a result the way sindri-loop step 7 now does: commit-kept for an
+    improvement, reset-tree otherwise — the subcommand does the git op AND the
+    record in one call (no test-side git commit/reset)."""
+    payload = build_record_payload(
+        candidate_id=cand["id"], metric_before=metric_before,
+        subagent_result=result, commit_sha=None,
+    )
+    cmd = "commit-kept" if result["status"] == "improved" else "reset-tree"
+    r = _sindri(repo, cmd, stdin=payload)
+    assert r.returncode == 0, r.stderr
+    return r
+
+
 @pytest.mark.e2e
 def test_happy_path_target_hit(target_repo: Path) -> None:
     """3 file deletions drive metric 30 → 20 → 10 → 0; target 99% forces all 3 kept before target_hit."""
@@ -109,26 +123,7 @@ def test_happy_path_target_hit(target_repo: Path) -> None:
             current_best=metric_before,
         )
 
-        commit_sha: str | None = None
-        if result["status"] == "improved":
-            subprocess.run(["git", "add", "-A"], cwd=target_repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-q", "-m",
-                 f"kept: {cand['name']} (Δ{result['metric_value'] - metric_before})"],
-                cwd=target_repo, check=True,
-            )
-            commit_sha = _git(target_repo, "rev-parse", "HEAD").strip()
-        else:
-            subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
-
-        payload = build_record_payload(
-            candidate_id=cand["id"],
-            metric_before=metric_before,
-            subagent_result=result,
-            commit_sha=commit_sha,
-        )
-        rec = _sindri(target_repo, "record-result", stdin=payload)
-        assert rec.returncode == 0, rec.stderr
+        _apply_result(target_repo, cand, result, metric_before)
 
     final_term = _check_termination(target_repo)
     assert final_term["terminated"] is True
@@ -183,13 +178,8 @@ def test_pool_exhausted_no_wins(target_repo: Path) -> None:
         result = run_stub_experiment(
             target_repo, cand["name"], recipes[cand["name"]], current_best=metric_before,
         )
-        # All regress → always reset.
-        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
-        payload = build_record_payload(
-            candidate_id=cand["id"], metric_before=metric_before,
-            subagent_result=result, commit_sha=None,
-        )
-        _sindri(target_repo, "record-result", stdin=payload)
+        # All regress → reset-tree reverts + records.
+        _apply_result(target_repo, cand, result, metric_before)
 
     term = _check_termination(target_repo)
     assert term["terminated"] is True
@@ -220,12 +210,7 @@ def test_check_failed_not_retried(target_repo: Path) -> None:
         current_best=metric_before,
     )
     assert result["status"] == "check_failed"
-    payload = build_record_payload(
-        candidate_id=cand["id"], metric_before=metric_before,
-        subagent_result=result, commit_sha=None,
-    )
-    rec = _sindri(target_repo, "record-result", stdin=payload)
-    assert rec.returncode == 0, rec.stderr
+    _apply_result(target_repo, cand, result, metric_before)
 
     # After record-result, pick-next must return null (check_failed is terminal per-candidate).
     nxt = _sindri(target_repo, "pick-next").stdout.strip()
@@ -266,12 +251,7 @@ def test_errored_storm_trips_max_reverts(target_repo: Path) -> None:
             target_repo, cand["name"], StubAction(force_error=True),
             current_best=metric_before,
         )
-        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
-        payload = build_record_payload(
-            candidate_id=cand["id"], metric_before=metric_before,
-            subagent_result=result, commit_sha=None,
-        )
-        _sindri(target_repo, "record-result", stdin=payload)
+        _apply_result(target_repo, cand, result, metric_before)
 
     assert terminated_reason == "max_reverts_in_a_row", terminated_reason
     # Halt fired before exhaustion → pending candidates remain, no kept commits.

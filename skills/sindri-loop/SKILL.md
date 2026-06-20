@@ -180,46 +180,34 @@ If `ACTUAL_BRANCH != EXPECTED_BRANCH` **or** `ACTUAL_SHA != EXPECTED_SHA`, the s
 
 This is **detection, not prevention**: it catches the realistic accident (a stray `checkout`/`reset`/local commit). It cannot detect or undo a `git push --force` to the remote — `HEAD` is unchanged in that case (detecting a remote clobber would need a `git ls-remote` snapshot before and after, a network round-trip per experiment, deliberately out of scope here).
 
-### 7. Act on the result
+### 7. Apply the result (commit or revert) and record it
 
-`metric_before` is `state.current_best` if set, else `state.baseline.value`.
-
-| `status` | Git action | Pool status (handled by record-result) |
-|---|---|---|
-| `improved` | `git add -A && git commit -m "kept: <candidate name> (Δ<delta>)"` — capture the new SHA | `kept` |
-| `regressed` | `git reset --hard HEAD` | `reverted` |
-| `inconclusive` | `git reset --hard HEAD` | `reverted` (low-confidence = no keep) |
-| `check_failed` | `git reset --hard HEAD` | `check_failed` (no retry) |
-| `errored` | `git reset --hard HEAD` | `errored` |
-| `timeout` | `git reset --hard HEAD` | `errored` (tracked separately for consecutive-timeout halt) |
-
-Commit message format: `kept: <candidate name> (Δ<signed delta>)`, e.g., `kept: Replace moment with date-fns (Δ-82000)`.
-
-### 8. Record the result
-
-Compose the RecordPayload and pipe to `record-result`:
+`metric_before` is `state.current_best` if set, else `state.baseline.value`. Compose the RecordPayload from this experiment:
 
 ```json
 {
   "candidate_id": <int, from step 4>,
   "metric_before": <float, from state.current_best or state.baseline.value>,
-  "subagent_result": <subagent JSON verbatim from step 6>,
-  "commit_sha": "<new SHA if status == improved, else null>"
+  "subagent_result": <subagent JSON verbatim from step 6>
 }
 ```
 
+Pipe it to the backend subcommand for the result class — the subcommand does the git action **and** the pool-status + `current_best` + jsonl write in one validated, crash-safe call. **You no longer run `git commit` / `git reset` yourself** (that's exactly the LLM-authored git the seam removed):
+
 ```bash
-echo "$PAYLOAD" | "$FORGE" record-result
+# improved      → commit-kept  (git-commits the kept change, records kept,
+#                 bumps current_best, captures the commit SHA in-process)
+# anything else → reset-tree   (git reset --hard HEAD, records the revert/dead-end)
+if [ "<status from step 6>" = "improved" ]; then
+  echo "$PAYLOAD" | "$FORGE" commit-kept
+else
+  echo "$PAYLOAD" | "$FORGE" reset-tree
+fi
 ```
 
-`record-result` atomically:
+The pool-status mapping is handled inside the subcommand: `improved → kept`, `regressed`/`inconclusive → reverted`, `check_failed → check_failed`, `errored`/`timeout → errored`. Both subcommands are **idempotent on a crash re-run** (they skip a candidate already recorded and never double-commit) and keep the jsonl-first ordering internally. If `commit-kept` finds the subagent claimed `improved` but left no net change, it records `errored` — no phantom keep.
 
-- Updates the candidate's pool status in `sindri.md`.
-- Sets `current_best` to the new metric value on `improved`.
-- Appends a `type: "experiment"` record to `sindri.jsonl` with full `metric_before`, `metric_after`, `delta`, `confidence_ratio`, `status`, `commit_sha`, `files_modified`.
-- Returns `{"ok": true, "new_status": "...", "current_best": ...}` on stdout.
-
-If record-result exits non-zero, run `"$FORGE" release-lock --token "$TOKEN"`, surface the stderr, and halt — writing state is the one operation that must never silently fail. (Do **not** call `ScheduleWakeup`.)
+If the subcommand exits non-zero, run `"$FORGE" release-lock --token "$TOKEN"`, surface the stderr, and halt — writing state is the one operation that must never silently fail. (Do **not** call `ScheduleWakeup`.)
 
 ### 9. Structural halt check
 
