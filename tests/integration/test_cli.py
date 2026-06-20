@@ -718,3 +718,85 @@ class TestInit:
         )
         assert r.returncode != 0
         assert "already exists" in r.stderr
+
+
+class TestLock:
+    @staticmethod
+    def _seed_state(tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=10.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/test",
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+
+    def test_acquire_held_release_cycle(self, tmp_path: Path) -> None:
+        self._seed_state(tmp_path)
+
+        r1 = _run_cli("acquire-lock", cwd=tmp_path)
+        assert r1.returncode == 0, r1.stderr
+        d1 = json.loads(r1.stdout)
+        assert d1["acquired"] is True
+        token = d1["token"]
+
+        # A second wakeup finds a live holder → exit 1 so it backs off without
+        # rescheduling a competing wakeup.
+        r2 = _run_cli("acquire-lock", cwd=tmp_path)
+        assert r2.returncode == 1
+        assert json.loads(r2.stdout)["acquired"] is False
+
+        # Release with the token frees it.
+        r3 = _run_cli("release-lock", "--token", token, cwd=tmp_path)
+        assert r3.returncode == 0
+        assert json.loads(r3.stdout)["released"] is True
+
+        # Now a fresh acquire succeeds again.
+        r4 = _run_cli("acquire-lock", cwd=tmp_path)
+        assert r4.returncode == 0
+        assert json.loads(r4.stdout)["acquired"] is True
+
+    def test_release_wrong_token_is_noop(self, tmp_path: Path) -> None:
+        self._seed_state(tmp_path)
+        _run_cli("acquire-lock", cwd=tmp_path)
+        r = _run_cli("release-lock", "--token", "not-the-token", cwd=tmp_path)
+        assert r.returncode == 0
+        assert json.loads(r.stdout)["released"] is False
+
+    def test_acquire_no_active_run_is_error_exit_2(self, tmp_path: Path) -> None:
+        # No .sindri/current/ — acquire-lock must exit 2 (error), NOT 1 (held),
+        # so the orchestrator surfaces the error instead of silently backing off
+        # without rescheduling. No traceback.
+        r = _run_cli("acquire-lock", cwd=tmp_path)
+        assert r.returncode == 2
+        assert "Traceback" not in r.stderr
+
+    def test_concurrent_acquire_has_exactly_one_winner(self, tmp_path: Path) -> None:
+        # The single-winner property under contention: launch many acquire-lock
+        # processes at once against a fresh run; exactly one must win (exit 0),
+        # the rest must report held (exit 1).
+        self._seed_state(tmp_path)
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-m", "sindri", "acquire-lock"],
+                cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            for _ in range(8)
+        ]
+        codes = [p.wait() for p in procs]
+        assert codes.count(0) == 1, f"expected exactly one winner, got codes {codes}"
+        assert codes.count(1) == len(procs) - 1, f"others must report held, got {codes}"
