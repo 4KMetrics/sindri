@@ -35,8 +35,14 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/sindri"]
+# Package name (not a relative path): the integration/e2e tests run the CLI from
+# a tmp cwd, so a relative `src/sindri` source would filter their coverage out.
+source = ["sindri"]
 branch = true
+# parallel + the scripts/cov sitecustomize hook capture coverage of cli.py,
+# which the integration/e2e suites exercise via `python -m sindri` subprocesses.
+# Run `./scripts/coverage.sh` (it sets COVERAGE_PROCESS_START + combines).
+parallel = true
 
 [tool.coverage.report]
 exclude_lines = [
