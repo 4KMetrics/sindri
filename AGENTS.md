@@ -35,8 +35,8 @@ plans/specs are point-in-time historical snapshots — do not retro-edit them to
 Skills and commands **never** call `python -m sindri` directly. They go through the wrapper
 `scripts/forge.sh` (resolved to a shell var `FORGE`), which runs the pinned published package via
 `uvx --from sindri-forge==<version> python -m sindri "$@"` — zero-install, no venv. There is **no**
-`[project.scripts]` console entry point, so bare `uvx sindri-forge` fails by design; always go via
-`python -m sindri`.
+`[project.scripts]` console entry point, so bare `uvx sindri-forge` fails by design; the wrapper
+invokes the module form (`python -m sindri`), never a console script.
 
 - All diagnostics go to **stderr**; **stdout stays clean** for JSON consumers (`read-state` etc.).
 - `SINDRI_FORGE_SOURCE=<path>` overrides the source to a local checkout for backend dev.
