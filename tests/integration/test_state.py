@@ -141,3 +141,47 @@ class TestJsonlAppend:
         captured = capsys.readouterr()
         assert "warning" in captured.err
         assert "line 2" in captured.err
+
+
+class TestAtomicWriteAndRecovery:
+    def test_write_is_atomic_no_tmp_left_behind(
+        self, tmp_sindri_dir: Path, sample_state: SindriState
+    ) -> None:
+        write_state(sample_state, dir=tmp_sindri_dir)
+        assert (tmp_sindri_dir / "sindri.md").exists()
+        assert not (tmp_sindri_dir / "sindri.md.tmp").exists()
+
+    def test_second_write_keeps_prior_state_as_bak(
+        self, tmp_sindri_dir: Path, sample_state: SindriState
+    ) -> None:
+        write_state(sample_state, dir=tmp_sindri_dir)
+        updated = sample_state.model_copy(update={"current_best": 700000.0})
+        write_state(updated, dir=tmp_sindri_dir)
+        bak = tmp_sindri_dir / "sindri.md.bak"
+        assert bak.exists()
+        # .bak holds the prior good state (no current_best); live file has the new one.
+        assert read_state(dir=tmp_sindri_dir).current_best == 700000.0
+        assert "current_best" not in bak.read_text() or '"current_best": null' in bak.read_text()
+
+    def test_corrupt_primary_recovers_from_bak(
+        self, tmp_sindri_dir: Path, sample_state: SindriState, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # First write establishes a good file; second creates a .bak snapshot.
+        write_state(sample_state, dir=tmp_sindri_dir)
+        write_state(sample_state.model_copy(update={"current_best": 700000.0}), dir=tmp_sindri_dir)
+        # Simulate a partial write: truncate sindri.md mid-frontmatter.
+        path = tmp_sindri_dir / "sindri.md"
+        path.write_text("---\n{\"goal\": {\"metric", encoding="utf-8")
+        recovered = read_state(dir=tmp_sindri_dir)
+        assert recovered.baseline.value == sample_state.baseline.value
+        assert "recovered from" in capsys.readouterr().err
+
+    def test_truncated_frontmatter_raises_stateioerror_not_valueerror(
+        self, tmp_sindri_dir: Path
+    ) -> None:
+        # No .bak present and the only file is truncated mid-frontmatter (no
+        # closing delimiter): must surface as StateIOError, not a bare ValueError.
+        path = tmp_sindri_dir / "sindri.md"
+        path.write_text("---\n{\"goal\": {\"metric_name\": \"x\"", encoding="utf-8")
+        with pytest.raises(StateIOError):
+            read_state(dir=tmp_sindri_dir)

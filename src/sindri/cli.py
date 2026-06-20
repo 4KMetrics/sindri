@@ -258,7 +258,6 @@ def _handle_record_result(args: argparse.Namespace) -> int:
     if res.status == "improved":
         updates["current_best"] = res.metric_value
     new_state = state.model_copy(update=updates)
-    write_state(new_state)
 
     rec = JsonlExperiment(
         ts=datetime.now(tz=timezone.utc),
@@ -273,7 +272,12 @@ def _handle_record_result(args: argparse.Namespace) -> int:
         commit_sha=payload.commit_sha,
         files_modified=res.files_modified,
     )
+    # Append the audit record FIRST, then write state. A crash between the two
+    # must not leave the pool showing a resolved candidate with no jsonl record
+    # (which would make the loop's experiments_run / consecutive_reverts
+    # counters undercount and silently evade the budget/runaway halts).
     append_jsonl(rec)
+    write_state(new_state)
 
     print(
         json.dumps(
