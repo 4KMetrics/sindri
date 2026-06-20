@@ -164,10 +164,13 @@ class TestReadState:
         assert data["mode"] == "local"
         assert len(data["pool"]) == 1
 
-    def test_missing_state_fails(self, tmp_path: Path) -> None:
+    def test_missing_state_degrades_cleanly(self, tmp_path: Path) -> None:
+        # No .sindri/current/ — read-state mirrors `status`: friendly line on
+        # stdout, exit 0, no traceback (parity locked by TestStatus too).
         r = _run_cli("read-state", cwd=tmp_path)
-        assert r.returncode != 0
-        assert "state" in r.stderr.lower()
+        assert r.returncode == 0, r.stderr
+        assert "no active run" in r.stdout
+        assert "Traceback" not in r.stderr
 
 
 class TestPickNext:
@@ -571,6 +574,14 @@ class TestStatus:
         assert "760" in r.stdout
         assert "reduce" in r.stdout.lower() or "bundle_bytes" in r.stdout.lower()
         assert "2" in r.stdout
+
+    def test_missing_state_degrades_cleanly(self, tmp_path: Path) -> None:
+        # No .sindri/current/ — friendly line on stdout, exit 0, no traceback.
+        # Byte-identical to read-state's no-active-run path.
+        r = _run_cli("status", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "no active run" in r.stdout
+        assert "Traceback" not in r.stderr
 
 
 class TestInit:
