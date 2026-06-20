@@ -48,10 +48,25 @@ _COMBINED_REMOTE_RE = re.compile("|".join(_REMOTE_TOOLS), re.IGNORECASE)
 CV_REMOTE_THRESHOLD = 0.15
 
 
+def _strip_comment_lines(text: str) -> str:
+    """Drop whole-line comments (first non-whitespace char is ``#``).
+
+    A mention of a remote tool in a comment ("# we don't use gh here") should
+    not classify the script as remote. We strip only pure comment lines — never
+    inline ``#`` — so a real `curl https://...` on a code line that happens to
+    contain a ``#`` (e.g. a URL fragment) is never accidentally removed, which
+    would be the dangerous direction (under-classifying remote → too-tight
+    timeouts).
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
 def script_content_signal(script_path: Path) -> Literal["local", "remote"]:
     """Scan script content for external-tool references."""
     # Cap at 1 MiB — we're scanning for keywords, not loading bundles.
-    text = script_path.read_text()[: 1 << 20]
+    text = _strip_comment_lines(script_path.read_text()[: 1 << 20])
     # Check always-remote tools first (cheap regex).
     if _COMBINED_REMOTE_RE.search(text):
         return "remote"
