@@ -9,6 +9,8 @@ sindri.jsonl is append-only; each line is one JSON-serialized pydantic model.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -29,31 +31,74 @@ _jsonl_adapter: TypeAdapter[JsonlRecord] = TypeAdapter(JsonlRecord)
 
 
 def write_state(state: SindriState, *, dir: Path = Path(".sindri/current")) -> None:
-    """Write state to `<dir>/sindri.md` as JSON frontmatter + markdown body."""
+    """Atomically write state to `<dir>/sindri.md` (JSON frontmatter + body).
+
+    The run's only source of truth must never be left half-written by a crash
+    (OOM, laptop sleep, Ctrl-C) during an unattended run. We write to a temp
+    file, ``fsync`` it, keep the prior good file as ``sindri.md.bak``, then
+    ``os.replace`` — atomic on POSIX, so ``sindri.md`` is always either the old
+    or the new content, never torn.
+    """
     dir.mkdir(parents=True, exist_ok=True)
     path = dir / "sindri.md"
-    frontmatter = state.model_dump_json(indent=2)
-    body = _render_human_body(state)
-    path.write_text(
-        f"{_FRONTMATTER_DELIM}{frontmatter}\n{_FRONTMATTER_DELIM}\n{body}",
-        encoding="utf-8",
+    tmp = path.with_name(path.name + ".tmp")
+    content = (
+        f"{_FRONTMATTER_DELIM}{state.model_dump_json(indent=2)}\n"
+        f"{_FRONTMATTER_DELIM}\n{_render_human_body(state)}"
     )
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    if path.exists():
+        # Preserve the last good state so a corrupt write can be rolled back.
+        shutil.copy2(path, path.with_name(path.name + ".bak"))
+    os.replace(tmp, path)
 
 
-def read_state(*, dir: Path = Path(".sindri/current")) -> SindriState:
-    """Read and validate sindri.md's frontmatter into a SindriState."""
-    path = dir / "sindri.md"
-    if not path.exists():
-        raise StateIOError(f"state file not found: {path}")
+def _parse_state_file(path: Path) -> SindriState:
+    """Parse one sindri.md file's frontmatter; raise StateIOError on any problem."""
     text = path.read_text(encoding="utf-8")
     if not text.startswith(_FRONTMATTER_DELIM):
         raise StateIOError(f"state file {path} missing frontmatter delimiter")
-    body_start = text.index(_FRONTMATTER_DELIM, len(_FRONTMATTER_DELIM))
+    try:
+        body_start = text.index(_FRONTMATTER_DELIM, len(_FRONTMATTER_DELIM))
+    except ValueError as e:
+        # Truncated mid-frontmatter (the partial-write corruption case): no
+        # closing delimiter. Surface as StateIOError, not a bare ValueError.
+        raise StateIOError(f"state file {path} has no closing frontmatter delimiter") from e
     fm = text[len(_FRONTMATTER_DELIM):body_start]
     try:
         return SindriState.model_validate_json(fm)
     except ValidationError as e:
         raise StateIOError(f"invalid state in {path}: {e}") from e
+
+
+def read_state(*, dir: Path = Path(".sindri/current")) -> SindriState:
+    """Read and validate sindri.md's frontmatter into a SindriState.
+
+    If the primary file exists but is corrupt (e.g. a partial write from a
+    crash), fall back to the ``sindri.md.bak`` snapshot left by `write_state`.
+    """
+    path = dir / "sindri.md"
+    if not path.exists():
+        raise StateIOError(f"state file not found: {path}")
+    try:
+        return _parse_state_file(path)
+    except StateIOError:
+        bak = path.with_name(path.name + ".bak")
+        if bak.exists():
+            try:
+                state = _parse_state_file(bak)
+            except StateIOError:
+                raise  # both corrupt — re-raise the primary error
+            else:
+                print(
+                    f"sindri: warning: {path} was unreadable; recovered from {bak}",
+                    file=sys.stderr,
+                )
+                return state
+        raise
 
 
 def append_jsonl(
@@ -67,8 +112,12 @@ def append_jsonl(
     # Safe because sindri is a single-writer process per .sindri/current/.
     # The earlier comment cited POSIX PIPE_BUF atomicity, which only applies
     # to pipes — regular file writes of any size race across processes.
+    # fsync so the record (esp. the terminated record that gates finalize)
+    # survives a power loss; read_jsonl tolerates a torn tail regardless.
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def read_jsonl(path: Path) -> list[JsonlRecord]:
