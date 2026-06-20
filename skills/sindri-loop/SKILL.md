@@ -42,7 +42,7 @@ If the sentinel exists:
 Otherwise, compute counters from state + jsonl:
 
 - `experiments_run`: count of `type == "experiment"` records in `sindri.jsonl`.
-- `consecutive_reverts`: starting from the tail of `sindri.jsonl`, count experiments with `status in {"regressed", "inconclusive", "errored", "timeout"}` until you hit a `status == "improved"` or run out.
+- `consecutive_reverts`: starting from the tail of `sindri.jsonl`, count experiments with `status in {"regressed", "inconclusive", "check_failed", "errored", "timeout"}` until you hit a `status == "improved"` or run out. (`check_failed` is a non-improvement like the rest — a pool that systematically fails its checks must trip `max_reverts_in_a_row` rather than burning the whole pool.)
 
 Pipe these to `check-termination` on stdin:
 

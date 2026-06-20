@@ -73,19 +73,36 @@ class TestCheckTermination:
         assert result.reason == "pool_empty"
         assert result.auto_finalize is False
 
-    def test_current_best_equals_baseline_is_not_a_win(self) -> None:
-        # Pins the _has_wins invariant: current_best == baseline.value does NOT
-        # count as a win, so pool_empty should not auto-finalize. Without this
-        # test, someone simplifying _has_wins to `is not None` would slip past.
-        pool = [Candidate(id=1, name="a", expected_impact_pct=-10, status="reverted")]
+    def test_kept_candidate_at_baseline_value_is_still_a_win(self) -> None:
+        # Regression for #32: _has_wins counts kept candidates, NOT
+        # current_best != baseline.value. A kept candidate whose metric landed
+        # exactly on the baseline (delta below noise) must still count as a win
+        # and auto-finalize — the old float-equality check wrongly suppressed it.
+        pool = [Candidate(id=1, name="a", expected_impact_pct=-10, status="kept")]
         s = _state(pool=pool, current_best=100.0)  # equal to baseline_value
+        result = check_termination(s, experiments_run=1, consecutive_reverts=0)
+        assert result.terminated is True
+        assert result.reason == "pool_empty"
+        assert result.auto_finalize is True
+
+    def test_no_kept_candidate_is_not_a_win(self) -> None:
+        # Inverse: a pool with no kept candidate never auto-finalizes, even if
+        # current_best happens to be set (e.g. a reverted experiment's value).
+        pool = [Candidate(id=1, name="a", expected_impact_pct=-10, status="reverted")]
+        s = _state(pool=pool, current_best=90.0)
         result = check_termination(s, experiments_run=1, consecutive_reverts=1)
         assert result.terminated is True
         assert result.reason == "pool_empty"
         assert result.auto_finalize is False
 
     def test_max_experiments_hit_with_wins(self) -> None:
-        s = _state(current_best=95.0)
+        # A kept candidate present (and a pending one so the pool isn't
+        # exhausted first) → max_experiments halt auto-finalizes.
+        pool = [
+            Candidate(id=1, name="a", expected_impact_pct=-10, status="kept"),
+            Candidate(id=2, name="b", expected_impact_pct=-5),
+        ]
+        s = _state(pool=pool, current_best=95.0)
         result = check_termination(s, experiments_run=50, consecutive_reverts=0)
         assert result.terminated is True
         assert result.reason == "max_experiments"
@@ -100,7 +117,11 @@ class TestCheckTermination:
 
     def test_max_wall_clock_hit(self) -> None:
         past = datetime.now(tz=timezone.utc) - timedelta(hours=10)
-        s = _state(current_best=90.0, started_at=past)
+        pool = [
+            Candidate(id=1, name="a", expected_impact_pct=-10, status="kept"),
+            Candidate(id=2, name="b", expected_impact_pct=-5),
+        ]
+        s = _state(pool=pool, current_best=90.0, started_at=past)
         result = check_termination(s, experiments_run=5, consecutive_reverts=0)
         assert result.terminated is True
         assert result.reason == "max_wall_clock"
