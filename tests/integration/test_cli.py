@@ -876,3 +876,85 @@ class TestRecordTerminated:
         )
         assert r.returncode == 1
         assert "Traceback" not in r.stderr
+
+
+class TestResetTree:
+    _REGRESS = json.dumps({
+        "candidate_id": 1, "metric_before": 1000.0,
+        "subagent_result": {
+            "metric_value": 1100.0, "reps_used": 3, "confidence_ratio": 5.0,
+            "status": "regressed", "files_modified": ["f.py"],
+        },
+    })
+
+    @staticmethod
+    def _setup(tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        (tmp_path / "f.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "base"], check=True, cwd=tmp_path, capture_output=True)
+        state = SindriState(
+            goal=Goal(metric_name="lines", direction="reduce", target_pct=10.0),
+            baseline=Baseline(value=1000.0, noise_floor=1.0, samples=[1000.0, 1001.0, 999.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/test",
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+
+    @staticmethod
+    def _experiment_lines(tmp_path: Path) -> list[str]:
+        path = tmp_path / ".sindri" / "current" / "sindri.jsonl"
+        return [ln for ln in path.read_text().splitlines() if '"experiment"' in ln]
+
+    def test_reverts_tree_and_records(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        (tmp_path / "f.py").write_text("x = 1\nGARBAGE\n")  # dirty change from the failed run
+        r = _run_cli("reset-tree", cwd=tmp_path, input=self._REGRESS)
+        assert r.returncode == 0, r.stderr
+        assert json.loads(r.stdout)["new_status"] == "reverted"
+        assert (tmp_path / "f.py").read_text() == "x = 1\n"  # tree restored
+        state = json.loads(_run_cli("read-state", cwd=tmp_path).stdout)
+        assert next(c for c in state["pool"] if c["id"] == 1)["status"] == "reverted"
+        assert len(self._experiment_lines(tmp_path)) == 1
+
+    def test_rejects_improved(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        improved = json.dumps({
+            "candidate_id": 1, "metric_before": 1000.0,
+            "subagent_result": {
+                "metric_value": 900.0, "reps_used": 3, "confidence_ratio": 5.0,
+                "status": "improved", "files_modified": [],
+            },
+        })
+        r = _run_cli("reset-tree", cwd=tmp_path, input=improved)
+        assert r.returncode == 1
+        assert "commit-kept" in r.stderr
+
+    def test_idempotent_on_rerun(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        assert _run_cli("reset-tree", cwd=tmp_path, input=self._REGRESS).returncode == 0
+        r2 = _run_cli("reset-tree", cwd=tmp_path, input=self._REGRESS)
+        assert r2.returncode == 0
+        assert json.loads(r2.stdout).get("skipped") is True
+        assert len(self._experiment_lines(tmp_path)) == 1  # no duplicate record
+
+    def test_no_active_run_degrades(self, tmp_path: Path) -> None:
+        r = _run_cli("reset-tree", cwd=tmp_path, input=self._REGRESS)
+        assert r.returncode == 1
+        assert "Traceback" not in r.stderr

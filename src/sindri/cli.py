@@ -64,6 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_acquire_lock(sub)
     _add_release_lock(sub)
     _add_record_terminated(sub)
+    _add_reset_tree(sub)
     return p
 
 
@@ -204,15 +205,28 @@ def _add_record_result(sub: argparse._SubParsersAction) -> None:
     )
 
 
-@_register("record-result")
-def _handle_record_result(args: argparse.Namespace) -> int:
+# The subagent's experiment status → the candidate's pool status.
+_POOL_STATUS_MAP = {
+    "improved": "kept",
+    "regressed": "reverted",
+    "inconclusive": "reverted",
+    "check_failed": "check_failed",
+    "errored": "errored",
+    "timeout": "errored",
+}
+
+
+def _read_record_payload():  # type: ignore[no-untyped-def]
+    """Parse the experiment-result payload from stdin.
+
+    Returns the validated payload, or None after printing an error (the caller
+    returns exit 1). Shared by record-result, reset-tree, and commit-kept.
+    """
     import json
-    from datetime import datetime, timezone
 
     from pydantic import BaseModel, ValidationError
 
-    from sindri.core.state import append_jsonl, write_state
-    from sindri.core.validators import JsonlExperiment, SubagentResult
+    from sindri.core.validators import SubagentResult
 
     class RecordPayload(BaseModel):
         candidate_id: int
@@ -221,42 +235,44 @@ def _handle_record_result(args: argparse.Namespace) -> int:
         commit_sha: str | None = None
 
     try:
-        raw = sys.stdin.read()
-        payload = RecordPayload.model_validate_json(raw)
+        return RecordPayload.model_validate_json(sys.stdin.read())
     except ValidationError as e:
         print(f"error: invalid payload: {e}", file=sys.stderr)
-        return 1
+        return None
     except json.JSONDecodeError as e:
         print(f"error: payload is not JSON: {e}", file=sys.stderr)
-        return 1
+        return None
 
-    state = _load_state_or_exit()
-    if state is None:
-        return 1
-    cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
-    if cand is None:
-        print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
-        return 1
+
+def _experiment_already_recorded(
+    candidate_id: int, *, dir: Path = Path(".sindri/current")
+) -> bool:
+    """True if a `type==experiment` record for this candidate id is already in
+    the jsonl — the idempotency key for crash-recovery re-runs (D4)."""
+    from sindri.core.state import read_jsonl
+
+    for r in read_jsonl(dir / "sindri.jsonl"):
+        if getattr(r, "type", None) == "experiment" and getattr(r, "id", None) == candidate_id:
+            return True
+    return False
+
+
+def _apply_and_record(state, cand, payload, *, commit_sha):  # type: ignore[no-untyped-def]
+    """Update the candidate's pool status (+ current_best on improved), then
+    append the jsonl experiment record FIRST and write state — the single home
+    of the jsonl-first ordering (#28) shared by record-result / reset-tree /
+    commit-kept. Returns (new_status, new_state)."""
+    from datetime import datetime, timezone
+
+    from sindri.core.state import append_jsonl, write_state
+    from sindri.core.validators import JsonlExperiment
 
     res = payload.subagent_result
-    delta = res.metric_value - payload.metric_before
-
-    pool_status_map = {
-        "improved": "kept",
-        "regressed": "reverted",
-        "inconclusive": "reverted",
-        "check_failed": "check_failed",
-        "errored": "errored",
-        "timeout": "errored",
-    }
-    new_status = pool_status_map[res.status]
-
-    new_pool = []
-    for c in state.pool:
-        if c.id == payload.candidate_id:
-            new_pool.append(c.model_copy(update={"status": new_status}))
-        else:
-            new_pool.append(c)
+    new_status = _POOL_STATUS_MAP[res.status]
+    new_pool = [
+        c.model_copy(update={"status": new_status}) if c.id == payload.candidate_id else c
+        for c in state.pool
+    ]
     updates: dict[str, object] = {"pool": new_pool}
     if res.status == "improved":
         updates["current_best"] = res.metric_value
@@ -269,26 +285,40 @@ def _handle_record_result(args: argparse.Namespace) -> int:
         reps_used=res.reps_used,
         metric_before=payload.metric_before,
         metric_after=res.metric_value,
-        delta=delta,
+        delta=res.metric_value - payload.metric_before,
         confidence_ratio=res.confidence_ratio,
         status=res.status,
-        commit_sha=payload.commit_sha,
+        commit_sha=commit_sha,
         files_modified=res.files_modified,
     )
     # Append the audit record FIRST, then write state. A crash between the two
     # must not leave the pool showing a resolved candidate with no jsonl record
-    # (which would make the loop's experiments_run / consecutive_reverts
-    # counters undercount and silently evade the budget/runaway halts).
+    # (which would make the loop's experiments_run / consecutive_reverts counters
+    # undercount and silently evade the budget/runaway halts).
     append_jsonl(rec)
     write_state(new_state)
+    return new_status, new_state
 
+
+@_register("record-result")
+def _handle_record_result(args: argparse.Namespace) -> int:
+    import json
+
+    payload = _read_record_payload()
+    if payload is None:
+        return 1
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+    cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
+    if cand is None:
+        print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
+        return 1
+
+    new_status, new_state = _apply_and_record(state, cand, payload, commit_sha=payload.commit_sha)
     print(
         json.dumps(
-            {
-                "ok": True,
-                "new_status": new_status,
-                "current_best": new_state.current_best,
-            }
+            {"ok": True, "new_status": new_status, "current_best": new_state.current_best}
         )
     )
     return 0
@@ -561,6 +591,53 @@ def _handle_record_terminated(args: argparse.Namespace) -> int:
             {"ok": True, "reason": rec.reason, "auto_finalize": rec.auto_finalize, "kept": kept}
         )
     )
+    return 0
+
+
+def _add_reset_tree(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "reset-tree",
+        help="git reset --hard HEAD and record a non-improved experiment result",
+    )
+
+
+@_register("reset-tree")
+def _handle_reset_tree(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.git_ops import GitError, reset_hard_to_head
+
+    payload = _read_record_payload()
+    if payload is None:
+        return 1
+    if payload.subagent_result.status == "improved":
+        print(
+            "error: reset-tree is for non-improved results; use commit-kept",
+            file=sys.stderr,
+        )
+        return 1
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+    cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
+    if cand is None:
+        print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
+        return 1
+
+    # D4 idempotency: a crash-recovery re-run of an already-recorded candidate
+    # must not append a duplicate experiment record.
+    if _experiment_already_recorded(payload.candidate_id):
+        print(json.dumps({"ok": True, "skipped": True, "reason": "already recorded"}))
+        return 0
+
+    try:
+        reset_hard_to_head()
+    except GitError as e:
+        print(f"error: git reset failed: {e}", file=sys.stderr)
+        return 1
+
+    new_status, _ = _apply_and_record(state, cand, payload, commit_sha=None)
+    print(json.dumps({"ok": True, "new_status": new_status}))
     return 0
 
 
