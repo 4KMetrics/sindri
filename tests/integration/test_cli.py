@@ -1163,3 +1163,84 @@ class TestPushBranch:
         r = _run_cli("push-branch", cwd=tmp_path)
         assert r.returncode == 1
         assert "Traceback" not in r.stderr
+
+
+class TestLogEvent:
+    @staticmethod
+    def _seed(tmp_path: Path, run_id: str = "testrun123") -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=10.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/test",
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+            run_id=run_id,
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+
+    @staticmethod
+    def _events(tmp_path: Path) -> list[dict]:
+        path = tmp_path / ".sindri" / "current" / "sindri.jsonl"
+        if not path.exists():
+            return []
+        out = []
+        for ln in path.read_text().splitlines():
+            if ln.strip():
+                d = json.loads(ln)
+                if d.get("type") == "event":
+                    out.append(d)
+        return out
+
+    def test_appends_event_with_run_id_and_details(self, tmp_path: Path) -> None:
+        self._seed(tmp_path)
+        r = _run_cli(
+            "log-event", "--event", "candidate_dispatched",
+            "--details", json.dumps({"candidate_id": 1, "name": "a"}),
+            cwd=tmp_path,
+        )
+        assert r.returncode == 0, r.stderr
+        events = self._events(tmp_path)
+        assert len(events) == 1
+        assert events[0]["event"] == "candidate_dispatched"
+        assert events[0]["run_id"] == "testrun123"  # correlated to the run
+        assert events[0]["details"] == {"candidate_id": 1, "name": "a"}
+
+    def test_verbose_only_gating(self, tmp_path: Path) -> None:
+        import os
+
+        self._seed(tmp_path)
+        # Without the flag set → skipped (not written).
+        env = {k: v for k, v in os.environ.items() if k != "SINDRI_FORGE_VERBOSE"}
+        r = subprocess.run(
+            [sys.executable, "-m", "sindri", "log-event", "--event", "noisy", "--verbose-only"],
+            cwd=tmp_path, capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0
+        assert json.loads(r.stdout).get("skipped") == "verbose-only"
+        assert self._events(tmp_path) == []
+        # With it set → written.
+        r2 = subprocess.run(
+            [sys.executable, "-m", "sindri", "log-event", "--event", "noisy", "--verbose-only"],
+            cwd=tmp_path, capture_output=True, text=True, env={**env, "SINDRI_FORGE_VERBOSE": "1"},
+        )
+        assert r2.returncode == 0
+        assert len(self._events(tmp_path)) == 1
+
+    def test_invalid_details_rejected(self, tmp_path: Path) -> None:
+        self._seed(tmp_path)
+        r = _run_cli("log-event", "--event", "x", "--details", "[1,2,3]", cwd=tmp_path)
+        assert r.returncode == 1
+        assert "JSON object" in r.stderr
