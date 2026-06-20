@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.1](https://github.com/4KMetrics/sindri/compare/v0.5.0...v0.5.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* count kept candidates for wins; include check_failed in revert halt ([#49](https://github.com/4KMetrics/sindri/issues/49)) ([27dc14a](https://github.com/4KMetrics/sindri/commit/27dc14a3756e8e66d3141c4d3013f117c12d06d2))
+* **security:** reject shell-breakout chars in Candidate.name ([#51](https://github.com/4KMetrics/sindri/issues/51)) ([3669db4](https://github.com/4KMetrics/sindri/commit/3669db44bd7b88a3ed4156401e8fb18dd9a6481a))
+* **state:** atomic writes, jsonl-first ordering, crash recovery ([#48](https://github.com/4KMetrics/sindri/issues/48)) ([16e4b1d](https://github.com/4KMetrics/sindri/commit/16e4b1de74c5add26f4a36f37885b2ad39588448))
+
+
+### Documentation
+
+* **readme:** add /sindri: command autocomplete menu ([#25](https://github.com/4KMetrics/sindri/issues/25)) ([77d12d9](https://github.com/4KMetrics/sindri/commit/77d12d956f7fefacc7f4af75e4e9ee0ba6e8f296))
+
 ## [0.5.0](https://github.com/4KMetrics/sindri/compare/v0.4.0...v0.5.0) (2026-06-20)
 
 
