@@ -40,8 +40,13 @@ class TerminationCheck(BaseModel):
 
 
 def _has_wins(state: SindriState) -> bool:
-    """True if at least one kept commit exists (current_best set to non-baseline)."""
-    return state.current_best is not None and state.current_best != state.baseline.value
+    """True if at least one experiment was kept (a kept commit exists on the branch).
+
+    Counts ``kept`` candidates directly rather than testing
+    ``current_best != baseline.value`` — float equality would wrongly suppress
+    auto-finalize when a kept value lands exactly on the baseline.
+    """
+    return any(c.status == "kept" for c in state.pool)
 
 
 def check_termination(
