@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/4KMetrics/sindri/compare/v0.4.0...v0.5.0) (2026-06-20)
+
+
+### Features
+
+* **commands:** split /sindri router into discrete /sindri:&lt;action&gt; commands ([#20](https://github.com/4KMetrics/sindri/issues/20)) ([04f1896](https://github.com/4KMetrics/sindri/commit/04f1896e64c78e717270f21b93bd30940e44fc86))
+
+
+### Bug Fixes
+
+* **cli:** read-state degrades cleanly with no active run ([#21](https://github.com/4KMetrics/sindri/issues/21)) ([85334a1](https://github.com/4KMetrics/sindri/commit/85334a122cf8a2c68ed1206b6464e274d3d6f039))
+
 ## [0.4.0](https://github.com/4KMetrics/sindri/compare/v0.3.2...v0.4.0) (2026-06-14)
 
 
