@@ -164,9 +164,13 @@ def _add_read_state(sub: argparse._SubParsersAction) -> None:
 
 @_register("read-state")
 def _handle_read_state(args: argparse.Namespace) -> int:
-    state = _load_state_or_exit()
-    if state is None:
-        return 1
+    from sindri.core.state import StateIOError, read_state
+
+    try:
+        state = read_state()
+    except StateIOError:
+        print("sindri: no active run (.sindri/current/ not found)")
+        return 0
     print(state.model_dump_json())
     return 0
 
