@@ -19,6 +19,28 @@ class TestScriptContentSignal:
         script.write_text("import subprocess\nsubprocess.run(['gh', 'workflow', 'run', 'ci.yml'])\n")
         assert script_content_signal(script) == "remote"
 
+    def test_remote_tool_only_in_a_comment_stays_local(self, tmp_path: Path) -> None:
+        # A remote tool mentioned only in a pure comment line must NOT classify
+        # the script as remote (over-classification inflates timeouts/reps).
+        script = tmp_path / "benchmark.py"
+        script.write_text(
+            "# NOTE: we deliberately don't use gh or ssh here — pure local count\n"
+            "import subprocess\n"
+            "print('METRIC lines=42')\n"
+        )
+        assert script_content_signal(script) == "local"
+
+    def test_remote_tool_in_code_after_comment_still_remote(self, tmp_path: Path) -> None:
+        # Only whole-line comments are stripped — a real code-line invocation is
+        # still detected even when a comment precedes it.
+        script = tmp_path / "benchmark.py"
+        script.write_text(
+            "# measure deploy latency\n"
+            "import subprocess\n"
+            "subprocess.run(['kubectl', 'get', 'pods'])\n"
+        )
+        assert script_content_signal(script) == "remote"
+
     def test_aws_cli_flags_remote(self, tmp_path: Path) -> None:
         script = tmp_path / "benchmark.py"
         script.write_text("subprocess.run(['aws', 's3', 'ls'])")

@@ -43,7 +43,7 @@ def _count_counters(repo: Path) -> tuple[int, int]:
     for exp in reversed(experiments):
         if exp["status"] == "improved":
             break
-        if exp["status"] in ("regressed", "inconclusive", "errored", "timeout"):
+        if exp["status"] in ("regressed", "inconclusive", "check_failed", "errored", "timeout"):
             consecutive_reverts += 1
         else:
             break
@@ -230,3 +230,52 @@ def test_check_failed_not_retried(target_repo: Path) -> None:
     # After record-result, pick-next must return null (check_failed is terminal per-candidate).
     nxt = _sindri(target_repo, "pick-next").stdout.strip()
     assert nxt == "null", f"check_failed candidate was re-picked: {nxt!r}"
+
+
+@pytest.mark.e2e
+def test_errored_storm_trips_max_reverts(target_repo: Path) -> None:
+    """A storm of errored experiments must trip max_reverts_in_a_row BEFORE the
+    pool is exhausted — the runaway halt for a systematically broken setup.
+
+    Pool (11) is larger than max_reverts_in_a_row (7, local default), so if the
+    halt didn't fire the loop would burn the whole pool. Checks termination at
+    the TOP of each iteration, exactly as the sindri-loop orchestrator does.
+    """
+    pool = [
+        {"id": i, "name": f"err {i}", "expected_impact_pct": -10, "files": []}
+        for i in range(1, 12)
+    ]
+    r = _sindri(
+        target_repo, "init",
+        "--goal", "reduce lines by 10%",
+        "--pool-json", json.dumps(pool),
+        "--script", ".claude/scripts/sindri/benchmark.py",
+    )
+    assert r.returncode == 0, r.stderr
+
+    terminated_reason = None
+    for _ in range(len(pool) + 1):
+        term = _check_termination(target_repo)
+        if term["terminated"]:
+            terminated_reason = term["reason"]
+            break
+        cand = json.loads(_sindri(target_repo, "pick-next").stdout)
+        assert cand is not None, "pool drained before the revert halt fired"
+        metric_before = _current_metric_before(target_repo)
+        result = run_stub_experiment(
+            target_repo, cand["name"], StubAction(force_error=True),
+            current_best=metric_before,
+        )
+        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=target_repo, check=True)
+        payload = build_record_payload(
+            candidate_id=cand["id"], metric_before=metric_before,
+            subagent_result=result, commit_sha=None,
+        )
+        _sindri(target_repo, "record-result", stdin=payload)
+
+    assert terminated_reason == "max_reverts_in_a_row", terminated_reason
+    # Halt fired before exhaustion → pending candidates remain, no kept commits.
+    state = json.loads(_sindri(target_repo, "read-state").stdout)
+    assert any(c["status"] == "pending" for c in state["pool"]), \
+        "revert halt should fire before the pool is exhausted"
+    assert "kept:" not in _git(target_repo, "log", "--oneline")
