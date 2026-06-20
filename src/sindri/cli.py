@@ -67,6 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_reset_tree(sub)
     _add_commit_kept(sub)
     _add_push_branch(sub)
+    _add_log_event(sub)
     return p
 
 
@@ -282,6 +283,7 @@ def _apply_and_record(state, cand, payload, *, commit_sha):  # type: ignore[no-u
 
     rec = JsonlExperiment(
         ts=datetime.now(tz=timezone.utc),
+        run_id=state.run_id,
         id=payload.candidate_id,
         candidate=cand.name,
         reps_used=res.reps_used,
@@ -578,6 +580,7 @@ def _handle_record_terminated(args: argparse.Namespace) -> int:
 
     rec = JsonlTerminated(
         ts=now,
+        run_id=state.run_id,
         reason=args.reason,
         final_metric=final_metric,
         delta_pct=delta_pct,
@@ -693,6 +696,65 @@ def _reconcile_pool_from_record(
     if rec.status == "improved":
         updates["current_best"] = rec.metric_after
     write_state(state.model_copy(update=updates))
+
+
+def _add_log_event(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "log-event",
+        help="append a structured orchestration event to sindri.jsonl (run log)",
+    )
+    p.add_argument("--event", required=True, help="event name, e.g. candidate_dispatched")
+    p.add_argument("--reason", default=None)
+    p.add_argument("--details", default=None, help="optional JSON object of structured details")
+    p.add_argument(
+        "--verbose-only",
+        action="store_true",
+        help="skip unless SINDRI_FORGE_VERBOSE=1 (for high-frequency events)",
+    )
+
+
+@_register("log-event")
+def _handle_log_event(args: argparse.Namespace) -> int:
+    import json
+    import os
+    from datetime import datetime, timezone
+
+    from sindri.core.state import StateIOError, append_jsonl, read_state
+    from sindri.core.validators import JsonlEvent
+
+    if args.verbose_only and os.environ.get("SINDRI_FORGE_VERBOSE") != "1":
+        print(json.dumps({"ok": True, "skipped": "verbose-only"}))
+        return 0
+
+    details = None
+    if args.details:
+        try:
+            details = json.loads(args.details)
+        except json.JSONDecodeError as e:
+            print(f"error: --details must be a JSON object: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(details, dict):
+            print("error: --details must be a JSON object", file=sys.stderr)
+            return 1
+
+    # run_id is best-effort — an event must never break the loop, so a missing/
+    # unreadable state just logs with an empty run_id.
+    try:
+        run_id = read_state().run_id
+    except StateIOError:
+        run_id = ""
+
+    append_jsonl(
+        JsonlEvent(
+            ts=datetime.now(tz=timezone.utc),
+            run_id=run_id,
+            event=args.event,
+            reason=args.reason,
+            details=details,
+        )
+    )
+    print(json.dumps({"ok": True, "event": args.event}))
+    return 0
 
 
 def _add_push_branch(sub: argparse._SubParsersAction) -> None:
@@ -970,6 +1032,9 @@ def _handle_init(args: argparse.Namespace) -> int:
         return 1
 
     now = datetime.now(tz=timezone.utc)
+    import uuid
+
+    run_id = uuid.uuid4().hex
     state = SindriState(
         goal=goal,
         baseline=Baseline(value=mean_val, noise_floor=sigma, samples=samples),
@@ -978,6 +1043,7 @@ def _handle_init(args: argparse.Namespace) -> int:
         started_at=now,
         guardrails=Guardrails(mode=mode),  # type: ignore[arg-type]
         mode=mode,
+        run_id=run_id,
     )
     write_state(state)
 
@@ -985,6 +1051,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     append_jsonl(
         JsonlSessionStart(
             ts=now,
+            run_id=run_id,
             goal=args.goal,
             target_pct=float(f"{sign}{target_pct}"),
             mode=mode,

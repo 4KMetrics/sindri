@@ -216,7 +216,7 @@ class TestSubagentResult:
 class TestJsonlRecords:
     def test_session_start(self) -> None:
         r = JsonlSessionStart(
-            ts=datetime(2026, 4, 19, 10, 0),
+            ts=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
             goal="reduce bundle_bytes by 15%",
             target_pct=-15.0,
             mode="local",
@@ -224,16 +224,16 @@ class TestJsonlRecords:
         assert r.type == "session_start"
 
     def test_baseline_run(self) -> None:
-        r = JsonlBaseline(ts=datetime.now(), run_index=1, value=842.0, is_warmup=True)
+        r = JsonlBaseline(ts=datetime.now(timezone.utc), run_index=1, value=842.0, is_warmup=True)
         assert r.type == "baseline"
 
     def test_baseline_complete(self) -> None:
-        r = JsonlBaselineComplete(ts=datetime.now(), mean=842.0, noise_floor=0.78)
+        r = JsonlBaselineComplete(ts=datetime.now(timezone.utc), mean=842.0, noise_floor=0.78)
         assert r.type == "baseline_complete"
 
     def test_experiment(self) -> None:
         r = JsonlExperiment(
-            ts=datetime.now(),
+            ts=datetime.now(timezone.utc),
             id=1,
             candidate="Replace moment",
             reps_used=3,
@@ -248,12 +248,12 @@ class TestJsonlRecords:
         assert r.type == "experiment"
 
     def test_event(self) -> None:
-        r = JsonlEvent(ts=datetime.now(), event="halted", reason="max_reverts", details="7 in a row")
+        r = JsonlEvent(ts=datetime.now(timezone.utc), event="halted", reason="max_reverts", details={"count": 7})
         assert r.type == "event"
 
     def test_terminated(self) -> None:
         r = JsonlTerminated(
-            ts=datetime.now(),
+            ts=datetime.now(timezone.utc),
             reason="target_hit",
             final_metric=714.0,
             delta_pct=-15.2,
@@ -264,3 +264,15 @@ class TestJsonlRecords:
             auto_finalize=True,
         )
         assert r.type == "terminated"
+
+    def test_naive_ts_rejected(self) -> None:
+        # A naive ts silently corrupts wall-clock math — every jsonl record type
+        # must reject it (validator lives on _JsonlBase).
+        with pytest.raises(ValidationError):
+            JsonlEvent(ts=datetime(2026, 4, 19, 10, 0), event="x")
+
+    def test_run_id_defaults_empty_and_roundtrips(self) -> None:
+        e1 = JsonlEvent(ts=datetime.now(timezone.utc), event="x")
+        assert e1.run_id == ""
+        e2 = JsonlEvent(ts=datetime.now(timezone.utc), event="x", run_id="abc123")
+        assert e2.run_id == "abc123"

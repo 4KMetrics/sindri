@@ -137,6 +137,14 @@ entry**, keyed on *"does a `type==experiment` record with this candidate id alre
 
 ### D5 — Structured run log (#37) · **A: single stream + `run_id`**
 
+> **Status: implemented.** `run_id` on `SindriState` (init-generated) stamped onto experiment /
+> terminated / event records; `_JsonlBase` now has the **tz validator** (the silent-naive-`ts`
+> corruption fix) and a `run_id` field; `JsonlEvent.details` is a typed dict; the **`log-event`**
+> subcommand emits `JsonlEvent`s gated by `--verbose-only` + `SINDRI_FORGE_VERBOSE`; the orchestrator
+> emits `candidate_dispatched` (which also gives D4 its in-flight visibility). `record-terminated`
+> already routed the terminate record through the backend. Further event sites (lock/reschedule) can
+> be added incrementally via `log-event`.
+
 Add `run_id` to `SindriState`, threaded into `_JsonlBase`. Emit the currently-invisible orchestration
 events (`candidate_dispatched`, `git_action`+sha, `schedule_wakeup`, `halt_consumed`,
 `preflight_reset`, plus D2's `lock_acquired`/`lock_stale_recovered`/`wakeup_skipped_holder_alive` and

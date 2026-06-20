@@ -13,7 +13,7 @@ VALID_CLI_SUBCOMMANDS = {
     "init", "validate-benchmark", "detect-mode", "read-state", "pick-next",
     "record-result", "check-termination", "generate-pr-body", "archive", "status",
     "acquire-lock", "release-lock", "record-terminated", "reset-tree", "commit-kept",
-    "push-branch",
+    "push-branch", "log-event",
 }
 
 

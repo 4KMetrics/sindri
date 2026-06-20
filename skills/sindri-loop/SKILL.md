@@ -135,6 +135,12 @@ Load the template at `prompts/experiment-subagent.md` (relative to the plugin in
 - `$REPS_POLICY` — from state.guardrails.reps_policy.
 - `$TIMEOUT_SECONDS` — from state.guardrails.timeout_per_experiment_seconds.
 
+Mark the candidate in-flight in the run log (so a crash mid-experiment is visible, and the `run_id` correlates it to this run):
+
+```bash
+"$FORGE" log-event --event candidate_dispatched --details "{\"candidate_id\": <id>, \"name\": \"<candidate name>\"}"
+```
+
 Invoke via `Task` tool:
 
 ```

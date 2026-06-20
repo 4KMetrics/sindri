@@ -143,6 +143,9 @@ class SindriState(BaseModel):
     guardrails: Guardrails
     mode: Literal["local", "remote"]
     current_best: float | None = None
+    # Stable per-run id for log/jsonl correlation. Defaults to "" so states
+    # written before run_id existed still parse; init sets a real value.
+    run_id: str = ""
 
     @field_validator("started_at")
     @classmethod
@@ -173,6 +176,18 @@ class SubagentResult(BaseModel):
 class _JsonlBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ts: datetime
+    # Correlates every record to its run (stamped from SindriState.run_id).
+    # Defaults to "" so records written before run_id existed still parse.
+    run_id: str = ""
+
+    @field_validator("ts")
+    @classmethod
+    def _ts_tz_aware(cls, v: datetime) -> datetime:
+        # A naive ts silently "becomes UTC" downstream and corrupts wall-clock
+        # post-mortem math; reject it at the boundary (mirrors started_at).
+        if v.tzinfo is None or v.tzinfo.utcoffset(v) is None:
+            raise ValueError("ts must be timezone-aware")
+        return v
 
 
 class JsonlSessionStart(_JsonlBase):
@@ -213,7 +228,8 @@ class JsonlEvent(_JsonlBase):
     type: Literal["event"] = "event"
     event: str
     reason: str | None = None
-    details: str | None = None
+    # Structured payload (commit_sha, timing, exit codes, candidate id, …).
+    details: dict[str, object] | None = None
 
 
 class JsonlTerminated(_JsonlBase):
