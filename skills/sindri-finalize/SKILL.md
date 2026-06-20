@@ -22,13 +22,13 @@ The Python core renders the body from `sindri.md` frontmatter + `sindri.jsonl` h
 
 ### 2. Push the branch
 
-Read the branch name from `.sindri/current/sindri.md` JSON frontmatter (`branch:` field).
+Push the run branch via the backend (it reads the branch from state, verifies you're on it, and runs `git push -u origin` — you don't run raw git):
 
 ```bash
-git push -u origin "<branch>"
+"$FORGE" push-branch
 ```
 
-If push fails (auth expired, remote missing, branch already on remote with divergent history):
+If push-branch exits non-zero (auth expired, remote missing, branch already on remote with divergent history, or you're not on the run branch):
 
 - Print: *"sindri: HALTED during finalize. `git push` failed — <stderr>. State preserved. Re-run `/sindri:finalize` after fixing, and it will retry from the same state."*
 - STOP. Do not retry destructively. Do not delete or rewrite history.
