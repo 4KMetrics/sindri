@@ -73,6 +73,31 @@ class TestCandidate:
         with pytest.raises(ValidationError):
             Candidate(id=1, name="x", expected_impact_pct=-5.0, status="maybe")  # type: ignore[arg-type]
 
+    def test_rich_punctuation_names_allowed(self) -> None:
+        # Ordinary names with punctuation must still parse — the validator only
+        # blocks shell-breakout chars, not readability.
+        for name in [
+            "Replace moment.js with day.js (tree-shake)",
+            "Use --production flag & strip 30% of deps",
+            "Lazy-load route: dashboard/settings",
+        ]:
+            assert Candidate(id=1, name=name, expected_impact_pct=-5.0).name == name
+
+    @pytest.mark.parametrize(
+        "evil",
+        [
+            'x"; rm -rf ~; echo "',   # close the double quote → inject
+            "x`whoami`",               # command substitution
+            "x$(id)",                  # command substitution
+            "x\\",                     # trailing backslash
+            "line1\nline2",            # newline breaks the commit -m string
+            "  ",                       # whitespace-only
+        ],
+    )
+    def test_shell_metachars_rejected(self, evil: str) -> None:
+        with pytest.raises(ValidationError):
+            Candidate(id=1, name=evil, expected_impact_pct=-5.0)
+
 
 class TestRepsPolicy:
     def test_local_defaults(self) -> None:

@@ -13,6 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# Candidate names are interpolated by the orchestrator into a `git commit -m
+# "kept: <name>"` shell string and later into the PR title/body. Reject the
+# characters that can break out of that (double-quote / backtick / $ for command
+# substitution, backslash) plus any control/newline char. Ordinary punctuation
+# (parens, dots, dashes, slashes, %, colons) stays allowed so names read well.
+NAME_FORBIDDEN_RE = re.compile(r'[`"$\\\x00-\x1f\x7f]')
+
 
 class Goal(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -46,6 +53,22 @@ class Candidate(BaseModel):
     status: Literal["pending", "kept", "reverted", "errored", "check_failed"] = "pending"
     files: list[str] = Field(default_factory=list)
     notes: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _no_shell_metachars(cls, v: str) -> str:
+        # The pool is LLM/user-supplied (e.g. via --pool-json); the name reaches
+        # an orchestrator-built `git commit -m "..."`. Block shell-breakout chars
+        # so a crafted name can't inject commands.
+        if not v.strip():
+            raise ValueError("candidate name must not be empty or whitespace-only")
+        if NAME_FORBIDDEN_RE.search(v):
+            raise ValueError(
+                f"candidate name {v!r} contains forbidden characters "
+                "(double-quote, backtick, $, backslash, or control/newline) — "
+                "these can break out of the git commit message / PR body"
+            )
+        return v
 
 
 class RepsPolicy(BaseModel):
