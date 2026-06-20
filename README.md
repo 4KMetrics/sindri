@@ -56,6 +56,27 @@ Sindri will:
 
 Check in anytime with `/sindri:status`. Halt with `/sindri:stop`. Abandon with `/sindri:clear`.
 
+## Commands
+
+Type `/sindri:` in Claude Code and every action is right there in the autocomplete menu — eight
+discrete, self-describing commands (no router, no guessing which sub-verb exists):
+
+```text
+> /sindri:
+  /sindri:forge     <goal statement>   Start a new optimization run from a goal — bounded,
+                                        target-driven experiments on any deterministic metric.
+  /sindri:status                       Print the status of the current run (or report none active).
+  /sindri:stop                         Signal the current run to halt at its next wakeup.
+  /sindri:clear                        Abandon the current run — destructive; deletes state + branch.
+  /sindri:setup                        Scaffold or repair the benchmark script for a run.
+  /sindri:help                         Show the command list and a one-line overview of each.
+  /sindri:loop                         ADVANCED. Run one orchestrator tick manually, no reschedule.
+  /sindri:finalize                     ADVANCED. Force a push + PR from the run's kept commits.
+```
+
+`forge`, `status`, `stop`, `clear`, `setup`, and `help` cover the normal lifecycle. `loop` and
+`finalize` are advanced/debug paths — the orchestrator runs them automatically during a live run.
+
 ## Architecture
 
 - **Python core** (`src/sindri/`) — pure functions: statistics, state file I/O, git wrappers, pool ordering, termination predicates, PR body rendering.
