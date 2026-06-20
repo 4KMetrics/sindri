@@ -65,6 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_release_lock(sub)
     _add_record_terminated(sub)
     _add_reset_tree(sub)
+    _add_commit_kept(sub)
     return p
 
 
@@ -638,6 +639,135 @@ def _handle_reset_tree(args: argparse.Namespace) -> int:
 
     new_status, _ = _apply_and_record(state, cand, payload, commit_sha=None)
     print(json.dumps({"ok": True, "new_status": new_status}))
+    return 0
+
+
+def _kept_commit_sha(name: str, *, cwd: Path | None = None) -> str | None:
+    """SHA of an existing `kept: <name> (Δ...)` commit on the current branch, or
+    None — confirms a keep commit physically landed (D4 tier b).
+
+    Anchored on the SUBJECT (not the body, not a substring): the subject must
+    start with `kept: <name> (Δ`. The `(Δ` delimiter after the exact name avoids
+    the false-positive where a candidate name is a prefix of a longer one (e.g.
+    `add cache` must NOT match `kept: add cache (lru) (Δ-10)`). Per ADR-001.
+    """
+    import re
+    import subprocess
+
+    pattern = re.compile(r"^kept: " + re.escape(name) + r" \(Δ")
+    try:
+        out = subprocess.run(
+            ["git", "log", "--format=%H %s"],
+            capture_output=True, text=True, check=True, cwd=cwd,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for line in out.splitlines():
+        sha, _, subject = line.partition(" ")
+        if pattern.match(subject):
+            return sha  # most recent matching commit (git log is newest-first)
+    return None
+
+
+def _reconcile_pool_from_record(
+    state, candidate_id: int, *, dir: Path = Path(".sindri/current")
+) -> None:  # type: ignore[no-untyped-def]
+    """Complete a crash-interrupted write: set the candidate's pool status (+
+    current_best) from its already-appended jsonl record, WITHOUT appending a
+    duplicate. Idempotent."""
+    from sindri.core.state import read_jsonl, write_state
+
+    rec = None
+    for r in read_jsonl(dir / "sindri.jsonl"):
+        if getattr(r, "type", None) == "experiment" and getattr(r, "id", None) == candidate_id:
+            rec = r
+    if rec is None:
+        return
+    new_status = _POOL_STATUS_MAP[rec.status]
+    new_pool = [
+        c.model_copy(update={"status": new_status}) if c.id == candidate_id else c
+        for c in state.pool
+    ]
+    updates: dict[str, object] = {"pool": new_pool}
+    if rec.status == "improved":
+        updates["current_best"] = rec.metric_after
+    write_state(state.model_copy(update=updates))
+
+
+def _add_commit_kept(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "commit-kept",
+        help="git-commit the kept change and record an improved result in one step",
+    )
+
+
+@_register("commit-kept")
+def _handle_commit_kept(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.git_ops import GitError, commit_all_with_message
+
+    payload = _read_record_payload()
+    if payload is None:
+        return 1
+    if payload.subagent_result.status != "improved":
+        print(
+            "error: commit-kept is for improved results only; use reset-tree",
+            file=sys.stderr,
+        )
+        return 1
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+    cand = next((c for c in state.pool if c.id == payload.candidate_id), None)
+    if cand is None:
+        print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
+        return 1
+
+    # D4 tier (a): the experiment is already recorded (crash after the jsonl
+    # append). Reconcile the pool from the existing record — no duplicate append,
+    # no duplicate commit — and skip.
+    if _experiment_already_recorded(payload.candidate_id):
+        _reconcile_pool_from_record(state, payload.candidate_id)
+        print(json.dumps({"ok": True, "skipped": True, "reason": "already recorded"}))
+        return 0
+
+    # D4 tier (b): the kept commit landed in a prior crashed run but the record
+    # didn't (crash between commit and append). Reuse that SHA — never double-commit.
+    sha = _kept_commit_sha(cand.name)
+    if sha is None:
+        delta = payload.subagent_result.metric_value - payload.metric_before
+        try:
+            sha = commit_all_with_message(f"kept: {cand.name} (Δ{delta:+g})")
+        except GitError:
+            # Subagent claimed "improved" but left no net change — git refuses the
+            # empty commit. It's not a real keep; record it as errored instead.
+            downgraded = payload.model_copy(
+                update={
+                    "subagent_result": payload.subagent_result.model_copy(
+                        update={"status": "errored"}
+                    )
+                }
+            )
+            _apply_and_record(state, cand, downgraded, commit_sha=None)
+            print(
+                json.dumps(
+                    {"ok": True, "new_status": "errored", "reason": "empty commit (no net change)"}
+                )
+            )
+            return 0
+
+    new_status, new_state = _apply_and_record(state, cand, payload, commit_sha=sha)
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "new_status": new_status,
+                "commit_sha": sha,
+                "current_best": new_state.current_best,
+            }
+        )
+    )
     return 0
 
 
