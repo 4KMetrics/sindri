@@ -57,6 +57,18 @@ echo ">> pick-next"
 echo ">> check-termination"
 echo '{"experiments_run": 0, "consecutive_reverts": 0}' | "$FORGE" check-termination
 
+# Exercise the MUTATION path — record-result is the one write that "must never
+# silently fail", and generate-pr-body reads the audit log it produces. The
+# read-only path above would pass even if these regressed.
+echo ">> record-result (improved)"
+RECORD_JSON='{"candidate_id":1,"metric_before":30.0,"subagent_result":{"metric_value":27.0,"reps_used":3,"confidence_ratio":5.0,"status":"improved","files_modified":["src/a.py"]}}'
+echo "$RECORD_JSON" | "$FORGE" record-result | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['ok'] and d['new_status']=='kept', d; print('  ->', d['new_status'])"
+
+echo ">> generate-pr-body (must be non-empty)"
+BODY="$("$FORGE" generate-pr-body)"
+[ -n "$BODY" ] || { echo "FAIL: generate-pr-body produced no output" >&2; exit 1; }
+echo "  pr body: ${#BODY} chars"
+
 echo ">> status"
 "$FORGE" status
 
