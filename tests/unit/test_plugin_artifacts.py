@@ -48,6 +48,34 @@ class TestPluginManifest:
         assert data["name"] == "sindri"
 
 
+class TestVersionLockstep:
+    """The matched-pair invariant the whole uvx distribution depends on.
+
+    forge.sh pins `sindri-forge==<plugin.json version>`; that version is only
+    publishable if `pyproject.toml` (the PyPI package) carries the same number.
+    release-please bumps all three together — this guard fails CI loudly if they
+    ever diverge, instead of shipping a plugin that pins an unpublished version.
+    """
+
+    @staticmethod
+    def _pyproject_version() -> str:
+        text = (REPO_ROOT / "pyproject.toml").read_text()
+        section = re.search(r"^\[project\]\s*\n(.*?)(?=^\[)", text, re.MULTILINE | re.DOTALL)
+        body = section.group(1) if section else text
+        m = re.search(r'^version\s*=\s*"([^"]+)"', body, re.MULTILINE)
+        assert m, "no [project].version in pyproject.toml"
+        return m.group(1)
+
+    def test_pyproject_plugin_and_manifest_versions_match(self) -> None:
+        pyproject_v = self._pyproject_version()
+        plugin_v = json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+        manifest_v = json.loads((REPO_ROOT / ".release-please-manifest.json").read_text())["."]
+        assert pyproject_v == plugin_v == manifest_v, (
+            "version lockstep broken — release will pin an unpublished version: "
+            f"pyproject={pyproject_v} plugin.json={plugin_v} manifest={manifest_v}"
+        )
+
+
 class TestMarketplaceManifest:
     PATH = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 
