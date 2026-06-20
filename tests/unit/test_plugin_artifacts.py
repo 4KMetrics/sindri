@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VALID_CLI_SUBCOMMANDS = {
     "init", "validate-benchmark", "detect-mode", "read-state", "pick-next",
     "record-result", "check-termination", "generate-pr-body", "archive", "status",
-    "acquire-lock", "release-lock",
+    "acquire-lock", "release-lock", "record-terminated",
 }
 
 
