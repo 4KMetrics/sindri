@@ -44,25 +44,47 @@ machinery one layer inward; it is **not** a new design.
 ### D2 — Single-writer lock (#29) · **B: standalone `RUNNING` sentinel, shipped now**
 
 `flock` is unusable: a wakeup spans ~5 separate `uvx` processes plus a long `Task` dispatch, so no
-held fd spans it. Use a sentinel file `.sindri/current/RUNNING` holding `{pid, host, run_id,
-started_at}` written via the atomic writer, with dedicated `acquire-lock` / `release-lock`
-subcommands. Ship it **independent of D1** — it is the highest-severity corruption bug in the cluster
-and is shippable today; do not hold it hostage to any larger redesign.
+held fd spans it. Use a sentinel file `.sindri/current/RUNNING` holding `{pid, host, started_at,
+token}` written via the atomic writer, with dedicated `acquire-lock` / `release-lock` subcommands.
+Ship it **independent of D1** — it is the highest-severity corruption bug in the cluster and is
+shippable today; do not hold it hostage to any larger redesign.
 
-**Consequences / rules:**
-- **Liveness** = `os.kill(pid, 0)` **AND** host match **AND** age < a small multiple of
-  `guardrails.timeout_per_experiment_seconds` (`validators.py:111`) — no new magic constant.
+**Implementation correction (discovered while building — supersedes the session-doc liveness
+design): liveness is AGE-based, not PID-based.** The process that writes `RUNNING` (`acquire-lock`)
+is an ephemeral `uvx` process that **exits immediately**, so its pid is dead by the time the next
+wakeup checks — an `os.kill(pid, 0)` probe would mark *every* lock stale and give zero protection.
+`pid`/`host` are therefore recorded as forensic metadata only.
+
+**Consequences / rules (as built — `src/sindri/core/lock.py`):**
+- **Liveness = age only:** a holder is live while `RUNNING` is younger than
+  `STALE_AGE_MULTIPLIER × guardrails.timeout_per_experiment_seconds` (`validators.py:111`; multiplier
+  = 2, the longest a legit wakeup can hold the lock) — no new magic constant.
+- **Release is token-scoped:** `acquire-lock` returns a `token`; the orchestrator threads it to
+  `release-lock --token`, which removes `RUNNING` only on a token match — so a wakeup can never release
+  another's lock.
 - **Acquire AFTER the HALT check** so `/sindri:stop` can always terminate a wedged-holder run.
   Non-negotiable.
-- **Release on every exit path** (HALT terminate, structural terminate, record-result-failure halt,
-  normal end), with the max-age fallback as the safety net for a missed release.
-- **Honest framing (must land here):** the acquire is a read-modify-write with **no compare-and-swap**,
-  so there is a real (tiny, given 60s spacing) TOCTOU window — the sentinel **contains** overlap (loser
-  no-ops) rather than truly serializing. Mitigate with an atomic `O_EXCL` claim-then-verify-our-PID-won.
-- **Also prevent, not just contain:** refuse to `ScheduleWakeup` when a live holder is detected.
+- **Release on every exit path** (structural terminate, record-result-failure halt, a thrown/timed-out
+  experiment `Task`, normal end), with the age fallback as the safety net for a missed release. (The
+  HALT terminate path returns *before* the acquire, so it never holds the lock.)
+- **Single-winner via flock (better than the session-doc's claim-then-verify):** the acquire/release
+  *decision* is serialized by a short-lived `flock` on a sidecar file (`.RUNNING.acquire`). flock can't
+  span the wakeup (the original reason it was rejected for the wakeup lock), but it cleanly serializes
+  the brief read-decide-write of one `acquire-lock` process against another — so the sentinel write is
+  a **true single-winner** with no TOCTOU / no compare-and-swap gymnastics. The wakeup-level overlap is
+  still *contained* (a second wakeup that finds a live holder backs off), not OS-level prevented.
+- **Exit-code contract:** `acquire-lock` exits **0** (acquired), **1** (held by a live holder → back
+  off **without** rescheduling), or **2** (error, e.g. no active run → surface and halt; must NOT be
+  treated as a silent backoff, or a transient state-read error would kill the loop). The orchestrator
+  branches on all three.
+- **Clock caveat:** liveness is wall-clock age, so it assumes a single host with a roughly stable
+  clock. A backward NTP step is handled (negative age ⇒ recent ⇒ live); a large *forward* jump could
+  prematurely age out a live holder — the 2× margin makes that unlikely.
+- **Also prevent, not just contain:** when `acquire-lock` reports a live holder, the orchestrator
+  backs off **without** calling `ScheduleWakeup` (the holder schedules the next tick).
 - **Correction to the session doc:** its claim that the pre-flight `git reset` clears `RUNNING` is
-  **false** — `.sindri/current/` is gitignored, so reset never touches it. Stale recovery is explicit
-  PID-liveness + max-age only.
+  **false** — `.sindri/current/` is gitignored, so reset never touches it. Stale recovery is the age
+  fallback + explicit release only.
 
 ### D3 — Subagent git isolation (#35) · **C: post-hoc verification, shipped now; A (worktree) deferred**
 

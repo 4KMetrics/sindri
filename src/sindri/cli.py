@@ -61,6 +61,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_archive(sub)
     _add_status(sub)
     _add_init(sub)
+    _add_acquire_lock(sub)
+    _add_release_lock(sub)
     return p
 
 
@@ -430,6 +432,67 @@ _GOAL_RE = re.compile(
     r"\s+by\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*",
     re.IGNORECASE,
 )
+
+
+def _add_acquire_lock(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "acquire-lock",
+        help="acquire the single-writer wakeup lock; exit 0 if acquired, 1 if held",
+    )
+
+
+@_register("acquire-lock")
+def _handle_acquire_lock(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.lock import STALE_AGE_MULTIPLIER, acquire_lock
+
+    state = _load_state_or_exit()
+    if state is None:
+        # Distinct from the "held" exit (1): a state read error must NOT make the
+        # orchestrator silently back off without rescheduling. exit 2 = error.
+        return 2
+    # Max-age = a small multiple of the per-experiment timeout (the longest a
+    # legit wakeup holds the lock). The resolved guardrail is an int post-init;
+    # fall back conservatively if somehow unset.
+    timeout = state.guardrails.timeout_per_experiment_seconds or 1800
+    res = acquire_lock(max_age_seconds=STALE_AGE_MULTIPLIER * float(timeout))
+    print(
+        json.dumps(
+            {
+                "acquired": res.acquired,
+                "took_over_stale": res.took_over_stale,
+                "token": res.holder.token,
+                "holder": {
+                    "pid": res.holder.pid,
+                    "host": res.holder.host,
+                    "started_at": res.holder.started_at.isoformat(),
+                },
+            }
+        )
+    )
+    # Exit non-zero when a live holder already owns the lock so the orchestrator
+    # can back off WITHOUT rescheduling a competing wakeup.
+    return 0 if res.acquired else 1
+
+
+def _add_release_lock(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "release-lock",
+        help="release the wakeup lock if we hold its token",
+    )
+    p.add_argument("--token", required=True, help="the token returned by acquire-lock")
+
+
+@_register("release-lock")
+def _handle_release_lock(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.lock import release_lock
+
+    released = release_lock(token=args.token)
+    print(json.dumps({"released": released}))
+    return 0
 
 
 def _add_init(sub: argparse._SubParsersAction) -> None:

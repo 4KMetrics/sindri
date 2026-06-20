@@ -39,6 +39,27 @@ If the sentinel exists:
 4. `rm .sindri/current/HALT` (clean up after consuming).
 5. **Do NOT call `ScheduleWakeup`.** Return.
 
+### 2a. Acquire the single-writer lock
+
+A slow experiment `Task` can still be running when the next wakeup fires, putting two orchestrators on one git tree. Claim the lock now — **after** the HALT check above (so `/sindri:stop` can always halt even a wedged run), before any other work:
+
+```bash
+LOCK_JSON=$("$FORGE" acquire-lock)
+LOCK_RC=$?
+```
+
+Branch on the exit code — they mean different things:
+
+- **`LOCK_RC == 1` (held):** a live wakeup already holds the lock. **Announce** *"sindri: another wakeup is active — backing off."* and **return immediately. Do NOT call `ScheduleWakeup`** — the active holder will schedule the next tick.
+- **`LOCK_RC >= 2` (error, e.g. no active run / unreadable state):** this is **not** a normal backoff. Surface the stderr and **halt** — do not back off silently and do not `ScheduleWakeup`. (Treat like a `record-result` failure.)
+- **`LOCK_RC == 0` (acquired):** capture the token and hold it for the rest of the wakeup:
+
+```bash
+TOKEN=$(printf '%s' "$LOCK_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+```
+
+Once acquired, you **must** run `"$FORGE" release-lock --token "$TOKEN"` on **every** way this wakeup can end — a structural/terminate halt, a `record-result` failure, a thrown/timed-out experiment `Task`, **and any other abnormal exit**, as well as the normal end-of-wakeup just before `ScheduleWakeup`. (A missed release is reclaimed only after the age fallback, blocking the next wakeup or two — so always release explicitly.)
+
 Otherwise, compute counters from state + jsonl:
 
 - `experiments_run`: count of `type == "experiment"` records in `sindri.jsonl`.
@@ -59,8 +80,9 @@ If `terminated`:
 3. Otherwise print a human-readable summary:
    - `reason == "pool_empty"` + kept == 0 → *"sindri: terminated (pool exhausted). 0 kept experiments out of <N> tried. No PR created. See `.sindri/current/`."*
    - Structural halts (`max_reverts_in_a_row`, `max_experiments`) → surface the halt reason and tell the user: *"State preserved in `.sindri/current/`. Fix the underlying issue and re-run `/sindri:forge`, or `/sindri:clear` to abandon."*
-4. **Do NOT call ScheduleWakeup.** The loop ends here.
-5. Return.
+4. `"$FORGE" release-lock --token "$TOKEN"` (the lock you acquired in step 2a).
+5. **Do NOT call ScheduleWakeup.** The loop ends here.
+6. Return.
 
 ### 3. Pre-flight git check
 
@@ -164,7 +186,7 @@ echo "$PAYLOAD" | "$FORGE" record-result
 - Appends a `type: "experiment"` record to `sindri.jsonl` with full `metric_before`, `metric_after`, `delta`, `confidence_ratio`, `status`, `commit_sha`, `files_modified`.
 - Returns `{"ok": true, "new_status": "...", "current_best": ...}` on stdout.
 
-If record-result exits non-zero, surface the stderr and halt — writing state is the one operation that must never silently fail.
+If record-result exits non-zero, run `"$FORGE" release-lock --token "$TOKEN"`, surface the stderr, and halt — writing state is the one operation that must never silently fail. (Do **not** call `ScheduleWakeup`.)
 
 ### 9. Structural halt check
 
@@ -183,6 +205,12 @@ Structural halts may now fire:
 If `terminated`: jump back to step 2's handling (surface → no wakeup).
 
 ### 10. Schedule the next wakeup
+
+First release the lock you've held since step 2a, then schedule the next tick (in that order, so the next wakeup can acquire):
+
+```bash
+"$FORGE" release-lock --token "$TOKEN"
+```
 
 ```
 ScheduleWakeup(
@@ -203,3 +231,4 @@ Return. You are done. The next wakeup starts fresh at step 1.
 - **Never finalize unless `auto_finalize: true`.** Some terminations (e.g., `halted_by_user` with 0 kept) should not produce a PR.
 - **Never call `ScheduleWakeup` on terminated runs.** That's a bug; the loop must end.
 - **Never retry `check_failed`.** Tests are deterministic; retrying is theater.
+- **Never proceed without the run lock, and never `ScheduleWakeup` when you couldn't acquire it.** A failed `acquire-lock` means another wakeup owns this tick — back off silently.
