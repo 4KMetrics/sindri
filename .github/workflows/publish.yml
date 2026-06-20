@@ -7,17 +7,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write  # required for PyPI trusted publisher (OIDC)
   contents: read
 
 jobs:
-  pypi:
-    name: build + publish to PyPI
+  # Decides whether a real release happened. No environment here, so it never
+  # prompts for review — it runs on every release-please completion (incl. PR
+  # updates) and on manual dispatch, and just emits is_release.
+  gate:
+    name: detect release tag
     runs-on: ubuntu-latest
-    # workflow_run fires on every release-please completion (PR updates + real
-    # releases). Only proceed when the upstream run succeeded, and then let the
-    # release-tag check inside the job decide whether a real release happened.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      is_release: ${{ steps.gate.outputs.is_release }}
+      tag: ${{ steps.gate.outputs.tag }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
@@ -40,29 +42,40 @@ jobs:
             echo ">> HEAD has no exact release tag — skipping publish."
           fi
 
+  # Builds and publishes. Bound to the protected `pypi` environment, so the
+  # deployment waits for a required reviewer. Only runs when gate says a real
+  # release happened — so regular pushes to main never trigger an approval.
+  publish:
+    name: build + publish to PyPI
+    needs: gate
+    if: needs.gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for PyPI trusted publisher (OIDC)
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - name: Set up Python
-        if: steps.gate.outputs.is_release == 'true'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
 
       - name: Install build tooling
-        if: steps.gate.outputs.is_release == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install build
 
       - name: Build wheel + sdist
-        if: steps.gate.outputs.is_release == 'true'
         run: python -m build
 
       - name: Publish to PyPI
-        if: steps.gate.outputs.is_release == 'true'
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
-        # Uses PyPI trusted publishing — no API token needed.
-        # One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
-        #   PyPI Project Name: sindri-forge
-        #   Owner: 4KMetrics
-        #   Repository name: sindri
-        #   Workflow name: publish.yml
-        #   Environment name: (blank)
+        # PyPI trusted publishing (OIDC) — no API token. The trusted-publisher
+        # config on PyPI must set Environment name: pypi to match this job.
+        #   PyPI Project Name: sindri-forge · Owner: 4KMetrics
+        #   Repository name: sindri · Workflow: publish.yml · Environment: pypi
