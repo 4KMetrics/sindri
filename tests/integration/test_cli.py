@@ -800,3 +800,79 @@ class TestLock:
         codes = [p.wait() for p in procs]
         assert codes.count(0) == 1, f"expected exactly one winner, got codes {codes}"
         assert codes.count(1) == len(procs) - 1, f"others must report held, got {codes}"
+
+
+class TestRecordTerminated:
+    @staticmethod
+    def _seed_mixed_pool(tmp_path: Path) -> None:
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        state = SindriState(
+            goal=Goal(metric_name="bundle_bytes", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=1000.0, noise_floor=10.0, samples=[1000.0, 1001.0, 999.0]),
+            pool=[
+                Candidate(id=1, name="a", expected_impact_pct=-10.0, status="kept"),
+                Candidate(id=2, name="b", expected_impact_pct=-5.0, status="reverted"),
+                Candidate(id=3, name="c", expected_impact_pct=-5.0, status="errored"),
+                Candidate(id=4, name="d", expected_impact_pct=-5.0, status="check_failed"),
+                Candidate(id=5, name="e", expected_impact_pct=-5.0, status="pending"),
+            ],
+            branch="sindri/reduce-bundle-bytes-15pct",
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+            current_best=850.0,
+        )
+        write_state(state, dir=tmp_path / ".sindri" / "current")
+
+    def _last_terminated(self, tmp_path: Path) -> dict:
+        path = tmp_path / ".sindri" / "current" / "sindri.jsonl"
+        records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        terminated = [r for r in records if r.get("type") == "terminated"]
+        assert terminated, "no terminated record written"
+        return terminated[-1]
+
+    def test_derives_counts_and_metrics_from_state(self, tmp_path: Path) -> None:
+        self._seed_mixed_pool(tmp_path)
+        r = _run_cli(
+            "record-terminated", "--reason", "pool_empty", "--auto-finalize", "true",
+            cwd=tmp_path,
+        )
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["ok"] is True and out["kept"] == 1
+
+        rec = self._last_terminated(tmp_path)
+        assert rec["reason"] == "pool_empty"
+        assert rec["auto_finalize"] is True
+        assert rec["kept"] == 1
+        assert rec["reverted"] == 1
+        assert rec["errored"] == 2  # errored + check_failed
+        assert rec["final_metric"] == 850.0
+        assert rec["delta_pct"] == (850.0 - 1000.0) / 1000.0 * 100
+
+    def test_invalid_reason_rejected(self, tmp_path: Path) -> None:
+        self._seed_mixed_pool(tmp_path)
+        r = _run_cli(
+            "record-terminated", "--reason", "made_up", "--auto-finalize", "false",
+            cwd=tmp_path,
+        )
+        assert r.returncode != 0  # argparse rejects the choice
+        assert "made_up" in r.stderr or "invalid choice" in r.stderr
+
+    def test_no_active_run_degrades(self, tmp_path: Path) -> None:
+        r = _run_cli(
+            "record-terminated", "--reason", "pool_empty", "--auto-finalize", "false",
+            cwd=tmp_path,
+        )
+        assert r.returncode == 1
+        assert "Traceback" not in r.stderr

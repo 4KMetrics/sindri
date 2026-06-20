@@ -34,7 +34,11 @@ fi
 If the sentinel exists:
 
 1. Count kept commits on the branch (`git log --oneline --grep "^kept:" | wc -l`).
-2. Append a terminated record to `sindri.jsonl`: `{"type":"terminated","reason":"halted_by_user","auto_finalize": <kept > 0>, ...}`.
+2. Append the terminated record via the backend (which derives the metric/count fields from state and validates the schema — never hand-build this JSON):
+
+   ```bash
+   "$FORGE" record-terminated --reason halted_by_user --auto-finalize <true|false>   # true iff kept > 0
+   ```
 3. If `kept > 0`, invoke `sindri-finalize`; otherwise announce to chat and stop.
 4. `rm .sindri/current/HALT` (clean up after consuming).
 5. **Do NOT call `ScheduleWakeup`.** Return.
@@ -75,7 +79,11 @@ Returns JSON: `{"terminated": bool, "reason": str | null, "auto_finalize": bool}
 
 If `terminated`:
 
-1. Append a terminated record to `sindri.jsonl` (via direct shell append, since Plan 1's record-result requires a candidate_id).
+1. Append the terminated record via the backend, passing the `reason` and `auto_finalize` from `check-termination`'s output (the metric/count fields are derived from state and validated by the backend):
+
+   ```bash
+   "$FORGE" record-terminated --reason "<reason>" --auto-finalize "<auto_finalize>"
+   ```
 2. If `auto_finalize` is `true` AND `kept >= 1`, invoke skill `sindri-finalize`.
 3. Otherwise print a human-readable summary:
    - `reason == "pool_empty"` + kept == 0 → *"sindri: terminated (pool exhausted). 0 kept experiments out of <N> tried. No PR created. See `.sindri/current/`."*

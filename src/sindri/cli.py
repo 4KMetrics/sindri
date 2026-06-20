@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_init(sub)
     _add_acquire_lock(sub)
     _add_release_lock(sub)
+    _add_record_terminated(sub)
     return p
 
 
@@ -492,6 +493,74 @@ def _handle_release_lock(args: argparse.Namespace) -> int:
 
     released = release_lock(token=args.token)
     print(json.dumps({"released": released}))
+    return 0
+
+
+_TERMINATION_REASONS = (
+    "target_hit",
+    "pool_empty",
+    "max_experiments",
+    "max_wall_clock",
+    "max_reverts_in_a_row",
+    "halted_by_user",
+    "halted_by_error",
+)
+
+
+def _add_record_terminated(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "record-terminated",
+        help="append a validated terminated record to sindri.jsonl",
+    )
+    p.add_argument("--reason", required=True, choices=_TERMINATION_REASONS)
+    p.add_argument(
+        "--auto-finalize",
+        required=True,
+        choices=("true", "false"),
+        help="whether a PR should be auto-created (from check-termination)",
+    )
+
+
+@_register("record-terminated")
+def _handle_record_terminated(args: argparse.Namespace) -> int:
+    import json
+    from datetime import datetime, timezone
+
+    from sindri.core.state import append_jsonl
+    from sindri.core.validators import JsonlTerminated
+
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+
+    # Everything except reason/auto_finalize (the orchestrator's decision inputs)
+    # is derived from state here, so the orchestrator no longer hand-builds JSON.
+    final_metric = state.current_best if state.current_best is not None else state.baseline.value
+    base = state.baseline.value
+    delta_pct = ((final_metric - base) / base) * 100 if base else 0.0
+    kept = sum(1 for c in state.pool if c.status == "kept")
+    reverted = sum(1 for c in state.pool if c.status == "reverted")
+    errored = sum(1 for c in state.pool if c.status in {"errored", "check_failed"})
+    now = datetime.now(tz=timezone.utc)
+    wall = max(0, int((now - state.started_at).total_seconds()))
+
+    rec = JsonlTerminated(
+        ts=now,
+        reason=args.reason,
+        final_metric=final_metric,
+        delta_pct=delta_pct,
+        kept=kept,
+        reverted=reverted,
+        errored=errored,
+        wall_clock_seconds=wall,
+        auto_finalize=(args.auto_finalize == "true"),
+    )
+    append_jsonl(rec)
+    print(
+        json.dumps(
+            {"ok": True, "reason": rec.reason, "auto_finalize": rec.auto_finalize, "kept": kept}
+        )
+    )
     return 0
 
 
