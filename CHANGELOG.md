@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.0](https://github.com/4KMetrics/sindri/compare/v0.5.1...v0.6.0) (2026-06-20)
+
+
+### Features
+
+* **cli:** commit-kept subcommand — coupled commit+state with D4 guard ([#36](https://github.com/4KMetrics/sindri/issues/36)) ([#63](https://github.com/4KMetrics/sindri/issues/63)) ([7258f2d](https://github.com/4KMetrics/sindri/commit/7258f2dc9ef9201dbfe028971c8b860b4e394b86))
+* **cli:** push-branch subcommand — final slice of the D1 seam ([#36](https://github.com/4KMetrics/sindri/issues/36)) ([#64](https://github.com/4KMetrics/sindri/issues/64)) ([1b89b5f](https://github.com/4KMetrics/sindri/commit/1b89b5fd2e176409e7fc34e696012b8bcb91ceba))
+* **cli:** record-terminated subcommand — backend-owned terminate record ([#36](https://github.com/4KMetrics/sindri/issues/36)) ([#61](https://github.com/4KMetrics/sindri/issues/61)) ([ff52924](https://github.com/4KMetrics/sindri/commit/ff52924bc1ad7cea62382c905ac8ce7541af021f))
+* **cli:** reset-tree subcommand + extract shared record helper ([#36](https://github.com/4KMetrics/sindri/issues/36)) ([#62](https://github.com/4KMetrics/sindri/issues/62)) ([662b2fc](https://github.com/4KMetrics/sindri/commit/662b2fc1a844477b2eba42003cb7b0812be53871))
+* **lock:** single-writer RUNNING sentinel for the wakeup loop ([#29](https://github.com/4KMetrics/sindri/issues/29)) ([#59](https://github.com/4KMetrics/sindri/issues/59)) ([d9f0142](https://github.com/4KMetrics/sindri/commit/d9f014205acc80731044fdaf617bae1e8aa1f291))
+* structured run log — run_id, log-event, tz validator ([#37](https://github.com/4KMetrics/sindri/issues/37), [#31](https://github.com/4KMetrics/sindri/issues/31)) ([#65](https://github.com/4KMetrics/sindri/issues/65)) ([0167f83](https://github.com/4KMetrics/sindri/commit/0167f83aa51ed2cf3131286a6892cdf8d130055d))
+
+
+### Bug Fixes
+
+* **loop:** verify the subagent didn't touch git before commit/reset ([#35](https://github.com/4KMetrics/sindri/issues/35)) ([#60](https://github.com/4KMetrics/sindri/issues/60)) ([ef0dcec](https://github.com/4KMetrics/sindri/commit/ef0dceca7abcecd82b7dbc736bd6523d523217ee))
+
+
+### Documentation
+
+* add CI/CD & release pipeline reference (docs/ci-cd.md) ([#55](https://github.com/4KMetrics/sindri/issues/55)) ([f1eef8c](https://github.com/4KMetrics/sindri/commit/f1eef8caf8551ca975bad488e45d0c0cabd0b01e))
+* add design-session agenda for the architecture cluster ([#57](https://github.com/4KMetrics/sindri/issues/57)) ([ff1614b](https://github.com/4KMetrics/sindri/commit/ff1614be1c7e243084ba52f82a3bf9c6a09fef03))
+* ADR-001 — architecture cluster decisions (D1–D5) ([#58](https://github.com/4KMetrics/sindri/issues/58)) ([6edcc14](https://github.com/4KMetrics/sindri/commit/6edcc147cd5e76c0c2f1b855d255d3fba9dd245e))
+
 ## [0.5.1](https://github.com/4KMetrics/sindri/compare/v0.5.0...v0.5.1) (2026-06-20)
 
 
