@@ -625,6 +625,29 @@ class TestInit:
         )
         assert "sindri/" in result.stdout
 
+    def test_init_warns_on_reduce_target_over_100pct(self, tmp_path: Path) -> None:
+        (tmp_path / "README.md").write_text("# test\n")
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        script = script_dir / "benchmark.py"
+        script.write_text("#!/usr/bin/env python3\nprint('METRIC bundle_bytes=100')\n")
+        script.chmod(0o755)
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+        pool_json = json.dumps([{"id": 1, "name": "x", "expected_impact_pct": -10.0}])
+        r = _run_cli(
+            "init",
+            "--goal", "reduce bundle_bytes by 150%",
+            "--pool-json", pool_json,
+            cwd=tmp_path,
+        )
+        # Warning is advisory only — init still proceeds.
+        assert "warning" in r.stderr.lower()
+        assert "150" in r.stderr
+
     def test_init_rejects_existing_current(self, tmp_path: Path) -> None:
         (tmp_path / ".sindri" / "current").mkdir(parents=True)
         (tmp_path / ".sindri" / "current" / "sindri.md").write_text("existing")

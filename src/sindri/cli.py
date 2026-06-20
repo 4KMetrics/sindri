@@ -499,6 +499,13 @@ def _handle_init(args: argparse.Namespace) -> int:
     metric_name = m.group("metric")
     target_pct = float(m.group("pct"))
 
+    if direction == "reduce" and target_pct >= 100:
+        print(
+            f"warning: reduce target of {target_pct:g}% implies a metric of <= 0, "
+            "which a benchmark likely can't reach — proceeding anyway.",
+            file=sys.stderr,
+        )
+
     try:
         goal = Goal(
             metric_name=metric_name,
