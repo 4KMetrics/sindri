@@ -88,6 +88,9 @@ wakeup checks — an `os.kill(pid, 0)` probe would mark *every* lock stale and g
 
 ### D3 — Subagent git isolation (#35) · **C: post-hoc verification, shipped now; A (worktree) deferred**
 
+> **Status: implemented** in `skills/sindri-loop/SKILL.md` (step 3 captures `EXPECTED_BRANCH`/
+> `EXPECTED_SHA`; step 6a asserts them before step 7's git action). Skill-Bash only, as decided.
+
 The threat model is an **LLM mistake**, not a hostile actor. Before the orchestrator's commit/reset
 step, assert `current_branch()` is the sindri branch and `HEAD` is the expected SHA; halt without
 committing if either is off. Ships as honest skill-Bash, independent of D1/D2.

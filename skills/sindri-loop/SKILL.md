@@ -98,6 +98,13 @@ git reset --hard HEAD
 
 This is a belt-and-suspenders recovery — kept commits survive (they're in HEAD); only unstaged/uncommitted changes are discarded.
 
+Now record the git state you are handing to the experiment — the subagent must only touch the **working tree**, never move `HEAD` or switch branches. Step 6a verifies this before any commit/reset:
+
+```bash
+EXPECTED_BRANCH="<state.branch>"   # e.g. sindri/reduce-bundle-bytes-15pct
+EXPECTED_SHA=$(git rev-parse HEAD)
+```
+
 ### 4. Pick next candidate
 
 ```bash
@@ -146,6 +153,24 @@ The subagent returns JSON on stdout matching `src/sindri/core/validators.py::Sub
 ```
 
 If the subagent's output doesn't parse as JSON or fails schema validation, treat it as `status: errored` (synthesize a minimal SubagentResult with `status: "errored"`, `metric_value: 0`, etc.) and continue with the revert path.
+
+### 6a. Verify the subagent didn't touch git
+
+The experiment subagent runs with full Bash and is *instructed* not to commit, push, checkout, or reset — but nothing enforces it. **Before any git action in step 7**, confirm it only touched the working tree:
+
+```bash
+ACTUAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+ACTUAL_SHA=$(git rev-parse HEAD)
+```
+
+If `ACTUAL_BRANCH != EXPECTED_BRANCH` **or** `ACTUAL_SHA != EXPECTED_SHA`, the subagent moved `HEAD` or switched branches. **Do NOT run step 7's commit/reset** — committing or `git reset --hard` now would land on the wrong branch or over the wrong base, compounding the damage. Instead:
+
+1. `git checkout "$EXPECTED_BRANCH"` to restore the local run branch (best-effort).
+2. `"$FORGE" release-lock --token "$TOKEN"`.
+3. Surface to the user: *"sindri: aborting this tick — the experiment subagent altered git state (branch/HEAD changed unexpectedly). No commit made; state preserved in `.sindri/current/`. Investigate before resuming."*
+4. **Do NOT `ScheduleWakeup`.** Return.
+
+This is **detection, not prevention**: it catches the realistic accident (a stray `checkout`/`reset`/local commit). It cannot detect or undo a `git push --force` to the remote — `HEAD` is unchanged in that case (detecting a remote clobber would need a `git ls-remote` snapshot before and after, a network round-trip per experiment, deliberately out of scope here).
 
 ### 7. Act on the result
 
@@ -232,3 +257,4 @@ Return. You are done. The next wakeup starts fresh at step 1.
 - **Never call `ScheduleWakeup` on terminated runs.** That's a bug; the loop must end.
 - **Never retry `check_failed`.** Tests are deterministic; retrying is theater.
 - **Never proceed without the run lock, and never `ScheduleWakeup` when you couldn't acquire it.** A failed `acquire-lock` means another wakeup owns this tick — back off silently.
+- **Never commit or reset when the step-6a tamper check fails.** If the subagent moved `HEAD` or switched branches, acting in step 7 lands the orchestrator on the wrong branch — abort the tick instead.
