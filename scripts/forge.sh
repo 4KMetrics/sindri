@@ -63,4 +63,17 @@ set -e
 if [ "$status" -eq 0 ] && [ -z "${SINDRI_FORGE_SOURCE:-}" ]; then
   mkdir -p "$CACHE_DIR" 2>/dev/null && : > "$WARMED" 2>/dev/null || true
 fi
+
+# If the very first run of this pinned version failed, the likeliest cause is a
+# uv resolution/network error (version yanked, PyPI unreachable) rather than a
+# backend error — already-fetched versions are "warmed", so this won't fire on
+# a normal non-zero backend exit. Surface a hint without masking the exit code.
+if [ "$status" -ne 0 ] && [ -z "${SINDRI_FORGE_SOURCE:-}" ] && [ ! -e "$WARMED" ]; then
+  {
+    echo "sindri: backend failed to start (exit $status)."
+    echo "  If this looks like a download error, sindri-forge==$VERSION may be"
+    echo "  unavailable (yanked, or PyPI unreachable). Check your network and"
+    echo "  https://pypi.org/project/sindri-forge/#history"
+  } >&2
+fi
 exit "$status"
