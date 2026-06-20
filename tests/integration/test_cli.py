@@ -1097,3 +1097,69 @@ class TestCommitKept:
         )
         assert _kept_commit_sha("add cache", cwd=tmp_path) is None
         assert _kept_commit_sha("add cache (lru)", cwd=tmp_path) is not None
+
+
+class TestPushBranch:
+    @staticmethod
+    def _setup(tmp_path: Path):
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import (
+            Baseline,
+            Candidate,
+            Goal,
+            Guardrails,
+            SindriState,
+        )
+
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=repo)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=repo)
+        subprocess.run(["git", "remote", "add", "origin", str(remote)], check=True, cwd=repo)
+        (repo / ".gitignore").write_text(".sindri/\n")
+        (repo / "f.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "-A"], check=True, cwd=repo)
+        subprocess.run(["git", "commit", "-m", "base"], check=True, cwd=repo, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "sindri/test"], check=True, cwd=repo, capture_output=True)
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=10.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0, status="kept")],
+            branch="sindri/test",
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        write_state(state, dir=repo / ".sindri" / "current")
+        return repo, remote
+
+    def test_pushes_run_branch(self, tmp_path: Path) -> None:
+        repo, remote = self._setup(tmp_path)
+        r = _run_cli("push-branch", cwd=repo)
+        assert r.returncode == 0, r.stderr
+        assert json.loads(r.stdout)["branch"] == "sindri/test"
+        ls = subprocess.run(
+            ["git", "ls-remote", "--heads", str(remote)], capture_output=True, text=True,
+        ).stdout
+        assert "refs/heads/sindri/test" in ls
+
+    def test_refuses_when_not_on_run_branch(self, tmp_path: Path) -> None:
+        repo, remote = self._setup(tmp_path)
+        subprocess.run(["git", "checkout", "main"], check=True, cwd=repo, capture_output=True)
+        r = _run_cli("push-branch", cwd=repo)
+        assert r.returncode == 1
+        assert "refusing to push" in r.stderr
+        ls = subprocess.run(
+            ["git", "ls-remote", "--heads", str(remote)], capture_output=True, text=True,
+        ).stdout
+        assert "sindri/test" not in ls  # nothing pushed
+
+    def test_no_active_run_degrades(self, tmp_path: Path) -> None:
+        r = _run_cli("push-branch", cwd=tmp_path)
+        assert r.returncode == 1
+        assert "Traceback" not in r.stderr

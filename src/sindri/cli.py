@@ -66,6 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_record_terminated(sub)
     _add_reset_tree(sub)
     _add_commit_kept(sub)
+    _add_push_branch(sub)
     return p
 
 
@@ -692,6 +693,45 @@ def _reconcile_pool_from_record(
     if rec.status == "improved":
         updates["current_best"] = rec.metric_after
     write_state(state.model_copy(update=updates))
+
+
+def _add_push_branch(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "push-branch",
+        help="git push -u origin the current run branch (finalize)",
+    )
+
+
+@_register("push-branch")
+def _handle_push_branch(args: argparse.Namespace) -> int:
+    import json
+
+    from sindri.core.git_ops import GitError, current_branch, push_with_upstream
+
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+    branch = state.branch
+    try:
+        cur = current_branch()
+    except GitError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    # Safety: only push the run branch, and only while we're actually on it —
+    # never push whatever branch the tree happens to be sitting on.
+    if cur != branch:
+        print(
+            f"error: on branch {cur!r}, expected the run branch {branch!r}; refusing to push",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        push_with_upstream(branch)
+    except GitError as e:
+        print(f"error: git push failed: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({"ok": True, "branch": branch}))
+    return 0
 
 
 def _add_commit_kept(sub: argparse._SubParsersAction) -> None:
