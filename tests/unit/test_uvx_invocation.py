@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Files that must be fully migrated to the wrapper.
 MIGRATED = [
-    REPO_ROOT / "commands" / "sindri.md",
+    REPO_ROOT / "commands" / "status.md",
     REPO_ROOT / "skills" / "sindri-start" / "SKILL.md",
     REPO_ROOT / "skills" / "sindri-loop" / "SKILL.md",
     REPO_ROOT / "skills" / "sindri-finalize" / "SKILL.md",

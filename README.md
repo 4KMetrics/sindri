@@ -18,12 +18,12 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 Then, in any repo you want to optimize:
 
 ```text
-/sindri reduce bundle_bytes by 15%
+/sindri:forge reduce bundle_bytes by 15%
 ```
 
 That's it. No `pip install`, no virtualenv. The Python backend (`sindri-forge`)
 is fetched on demand by [`uv`](https://docs.astral.sh/uv/). If `uv` isn't
-installed, `/sindri` prints a one-line install command and stops.
+installed, `/sindri:forge` prints a one-line install command and stops.
 
 > Sindri is published in the Anthropic community marketplace
 > (`anthropics/claude-plugins-community`). If you haven't added it yet:
@@ -42,7 +42,7 @@ Requirements:
 
 ```bash
 # In the repo you want to optimize:
-/sindri reduce bundle_bytes by 15%
+/sindri:forge reduce bundle_bytes by 15%
 ```
 
 Sindri will:
@@ -54,7 +54,7 @@ Sindri will:
 5. Loop autonomously — one experiment per wakeup, ~60s between them.
 6. When the target hits (or the pool drains with ≥1 win), push the branch and open a PR.
 
-Check in anytime with `/sindri status`. Halt with `/sindri stop`. Abandon with `/sindri clear`.
+Check in anytime with `/sindri:status`. Halt with `/sindri:stop`. Abandon with `/sindri:clear`.
 
 ## Architecture
 
@@ -82,7 +82,7 @@ cd ~/src/sindri && ./scripts/install-plugin.sh   # symlinks the plugin only
 ```
 
 To test local backend edits (instead of the published package), point the
-launcher at your checkout before running `/sindri`:
+launcher at your checkout before running `/sindri:forge`:
 
 ```bash
 export SINDRI_FORGE_SOURCE="$(pwd)"
