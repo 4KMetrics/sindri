@@ -12,6 +12,20 @@ Resolve `FORGE` to this plugin's `scripts/forge.sh` (this skill lives at `<plugi
 
 ## Steps
 
+### 0. Re-validate the kept stack (final independent measurement)
+
+Each keep was independently verified at its own wakeup (step 6b of the loop). As a last guard against accumulated lucky-noise keeps, re-measure the **branch tip** once with the trusted benchmark and compare to the **original baseline**:
+
+```bash
+TIP=$("$FORGE" validate-benchmark --script <benchmark path> --expected <metric_name> \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['metric_value'])")
+```
+
+Read `baseline.value`, `current_best`, and `goal.direction` from `sindri.md`. The tip must beat the baseline in the goal direction (reduce → `TIP < baseline`; increase → `TIP > baseline`) and be consistent with the recorded `current_best`.
+
+- **Holds up** → record the verified end-to-end delta and continue; include `TIP` (independently re-measured) in the PR body and the step-5 summary so the shipped number is one nobody self-reported.
+- **Does NOT hold up** (tip fails to beat baseline, or contradicts `current_best`) → **HALT finalize (jidoka).** Print: *"sindri: final re-validation FAILED — branch tip measured `<TIP>` vs baseline `<baseline>` (`current_best` was `<cb>`). Not opening a PR for a result that doesn't reproduce. State preserved in `.sindri/current/`; investigate (noise, non-determinism, or a benchmark change)."* Do not push, do not open a PR.
+
 ### 1. Generate the PR body
 
 ```bash

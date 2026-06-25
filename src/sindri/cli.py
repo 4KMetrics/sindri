@@ -65,6 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_release_lock(sub)
     _add_record_terminated(sub)
     _add_reset_tree(sub)
+    _add_verify_candidate(sub)
     _add_commit_kept(sub)
     _add_push_branch(sub)
     _add_log_event(sub)
@@ -236,6 +237,10 @@ def _read_record_payload():  # type: ignore[no-untyped-def]
         metric_before: float
         subagent_result: SubagentResult
         commit_sha: str | None = None
+        # commit-kept re-measures with these (inline measurement authority); reset-tree
+        # and record-result ignore them. Optional so those verbs' payloads stay valid.
+        benchmark_cmd: str | None = None
+        checks_cmd: str | None = None
 
     try:
         return RecordPayload.model_validate_json(sys.stdin.read())
@@ -796,6 +801,208 @@ def _handle_push_branch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_verify_candidate(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "verify-candidate",
+        help="independently re-run the benchmark on the working tree and record a "
+        "verification; reads JSON {candidate_id, benchmark_cmd, [checks_cmd], [reps]} "
+        "from stdin. The measurer is the core, not the subagent.",
+    )
+
+
+def _head_sha() -> str:
+    """Current HEAD sha, or '' if not resolvable."""
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def _measure_candidate(state, benchmark_cmd: str, checks_cmd: str | None):  # type: ignore[no-untyped-def]
+    """Independently measure the candidate in the working tree with the TRUSTED
+    (tracked, unmodified) benchmark and decide. THE single measurement authority.
+
+    Trusts nothing the subagent can write (no jsonl events / records) — it re-runs
+    the benchmark itself. Returns a dict:
+        {verified, status, metric_value, confidence_ratio, reps_used, reason}.
+
+    Integrity gates (jidoka — any doubt ⇒ not verified):
+      - the benchmark/checks must be TRACKED at HEAD,
+      - they (and the benchmark's directory) must be UNMODIFIED vs HEAD,
+      - the benchmark's directory must have no UNTRACKED files (a sibling it imports).
+    Residual (v1, not sandboxed): a benchmark importing code OUTSIDE its directory,
+    or reading out-of-repo state (cache/env/network), is not isolated — see SKILL.md.
+    """
+    import subprocess
+
+    from sindri.core.metric import MetricParseError, parse_metric_line
+    from sindri.core.noise import sample_mean
+    from sindri.core.verify import decide_verification
+
+    def fail(reason: str, reps_used: int = 0) -> dict:
+        return {
+            "verified": False, "status": "errored", "metric_value": 0.0,
+            "confidence_ratio": 0.0, "reps_used": reps_used, "reason": reason,
+        }
+
+    metric_name = state.goal.metric_name
+    direction = state.goal.direction
+    metric_before = (
+        state.current_best if state.current_best is not None else state.baseline.value
+    )
+    noise = state.baseline.noise_floor
+    threshold = state.guardrails.reps_policy.confidence_threshold
+    reps = max(1, 1 if state.mode == "remote" else state.guardrails.baseline_reps)
+    timeout = state.guardrails.timeout_per_experiment_seconds
+
+    files = [benchmark_cmd] + ([checks_cmd] if checks_cmd else [])
+    for p in files:
+        if subprocess.run(["git", "cat-file", "-e", f"HEAD:{p}"], capture_output=True).returncode != 0:
+            return fail("benchmark_untracked")
+    instrument = set(files)
+    bdir = benchmark_cmd.rsplit("/", 1)[0] if "/" in benchmark_cmd else ""
+    if bdir:
+        instrument.add(bdir)
+    if subprocess.run(
+        ["git", "diff", "--quiet", "HEAD", "--", *sorted(instrument)], capture_output=True
+    ).returncode != 0:
+        return fail("benchmark_tampered")
+    if bdir:
+        others = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", bdir],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        if others:
+            return fail("benchmark_untracked")
+
+    samples: list[float] = []
+    for _ in range(reps):
+        try:
+            proc = subprocess.run(
+                [sys.executable, benchmark_cmd], capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return fail("timeout", len(samples))
+        if proc.returncode != 0:
+            return fail("benchmark_nonzero", len(samples))
+        try:
+            _, value = parse_metric_line(proc.stdout, expected_name=metric_name)
+        except MetricParseError:
+            return fail("no_metric_line", len(samples))
+        samples.append(value)
+
+    if checks_cmd:
+        try:
+            cp = subprocess.run(
+                [sys.executable, checks_cmd], capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return fail("checks_timeout", len(samples))
+        if cp.returncode != 0:
+            return fail("checks_failed", len(samples))
+
+    mean = sample_mean(samples)
+    d = decide_verification(
+        independent_value=mean, metric_before=metric_before,
+        direction=direction, noise_floor=noise, confidence_threshold=threshold,
+    )
+    return {
+        "verified": d.verified, "status": d.status, "metric_value": mean,
+        "confidence_ratio": d.confidence_ratio, "reps_used": len(samples), "reason": None,
+    }
+
+
+def _recorded_experiment_improved(
+    candidate_id: int, *, dir: Path = Path(".sindri/current")
+) -> bool:
+    """True if the recorded experiment for this candidate is an improvement. Used to
+    decide whether crash-recovery tier (a) must be backed by a real kept commit."""
+    from sindri.core.state import read_jsonl
+
+    status = None
+    for r in read_jsonl(dir / "sindri.jsonl"):
+        if getattr(r, "type", None) == "experiment" and getattr(r, "id", None) == candidate_id:
+            status = getattr(r, "status", None)
+    return status == "improved"
+
+
+def _verify_bypass_allowed(candidate_id: int, head_sha: str, run_id: str) -> bool:
+    """Emergency andon override. True iff SINDRI_ALLOW_UNVERIFIED_KEEP=1, recording
+    a loud `verify_bypassed` event so the bypass is always in the audit trail.
+    Off by default — the seam holds unless a human explicitly pulls this."""
+    import os
+
+    if os.environ.get("SINDRI_ALLOW_UNVERIFIED_KEEP") != "1":
+        return False
+    from datetime import datetime, timezone
+
+    from sindri.core.state import append_jsonl
+    from sindri.core.validators import JsonlEvent
+
+    append_jsonl(
+        JsonlEvent(
+            ts=datetime.now(tz=timezone.utc),
+            run_id=run_id,
+            event="verify_bypassed",
+            reason="SINDRI_ALLOW_UNVERIFIED_KEEP",
+            details={"candidate_id": candidate_id, "base_sha": head_sha},
+        )
+    )
+    print(
+        "warning: committing an UNVERIFIED keep "
+        "(SINDRI_ALLOW_UNVERIFIED_KEEP=1) — measurement seam bypassed",
+        file=sys.stderr,
+    )
+    return True
+
+
+@_register("verify-candidate")
+def _handle_verify_candidate(args: argparse.Namespace) -> int:
+    """ADVISORY 6b check: independently measure the candidate so the orchestrator
+    can decide keep-vs-reset. This is NOT a trust anchor — `commit-kept` re-measures
+    authoritatively (the recorded event is subagent-writable, so the keep never
+    relies on it)."""
+    import json
+    from datetime import datetime, timezone
+
+    from sindri.core.state import append_jsonl
+    from sindri.core.validators import JsonlEvent
+
+    try:
+        payload = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as e:
+        print(f"error: stdin is not JSON: {e}", file=sys.stderr)
+        return 1
+    candidate_id = payload.get("candidate_id")
+    benchmark_cmd = payload.get("benchmark_cmd")
+    checks_cmd = payload.get("checks_cmd")
+    if candidate_id is None or not benchmark_cmd:
+        print("error: stdin needs {candidate_id, benchmark_cmd}", file=sys.stderr)
+        return 1
+
+    state = _load_state_or_exit()
+    if state is None:
+        return 1
+
+    base_sha = _head_sha()
+    result = _measure_candidate(state, benchmark_cmd, checks_cmd)
+    append_jsonl(
+        JsonlEvent(
+            ts=datetime.now(tz=timezone.utc),
+            run_id=state.run_id,
+            event="verify",
+            reason=result["reason"],
+            details={"candidate_id": candidate_id, "base_sha": base_sha, **result},
+        )
+    )
+    print(json.dumps({**result, "base_sha": base_sha}))
+    return 0
+
+
 def _add_commit_kept(sub: argparse._SubParsersAction) -> None:
     sub.add_parser(
         "commit-kept",
@@ -826,18 +1033,80 @@ def _handle_commit_kept(args: argparse.Namespace) -> int:
         print(f"error: no candidate with id {payload.candidate_id}", file=sys.stderr)
         return 1
 
-    # D4 tier (a): the experiment is already recorded (crash after the jsonl
-    # append). Reconcile the pool from the existing record — no duplicate append,
-    # no duplicate commit — and skip.
-    if _experiment_already_recorded(payload.candidate_id):
-        _reconcile_pool_from_record(state, payload.candidate_id)
-        print(json.dumps({"ok": True, "skipped": True, "reason": "already recorded"}))
-        return 0
+    def _with_verified(p, r):  # type: ignore[no-untyped-def]
+        # Record the INDEPENDENTLY-measured value, never the subagent's self-report.
+        return p.model_copy(
+            update={
+                "subagent_result": p.subagent_result.model_copy(
+                    update={
+                        "metric_value": r["metric_value"],
+                        "confidence_ratio": r["confidence_ratio"],
+                    }
+                )
+            }
+        )
 
-    # D4 tier (b): the kept commit landed in a prior crashed run but the record
-    # didn't (crash between commit and append). Reuse that SHA — never double-commit.
+    # Crash-recovery tier (a): the experiment is already recorded. Reconcile + skip —
+    # but only honor an "improved" record if a REAL kept commit backs it, so a forged
+    # jsonl line (the subagent can write the file) can't launder a fabricated keep.
+    if _experiment_already_recorded(payload.candidate_id):
+        if not _recorded_experiment_improved(payload.candidate_id) or _kept_commit_sha(cand.name):
+            _reconcile_pool_from_record(state, payload.candidate_id)
+            print(json.dumps({"ok": True, "skipped": True, "reason": "already recorded"}))
+            return 0
+        # else: an "improved" record with no commit → not a real keep → fall through.
+
+    # MEASUREMENT SEAM (poka-yoke): commit-kept is the SINGLE measurement authority.
+    # It re-runs the trusted benchmark ITSELF and trusts no subagent-writable record
+    # (a forged `verify`/`experiment` line cannot make it commit). No benchmark_cmd ⇒
+    # it cannot verify ⇒ it refuses, unless the explicit andon override is pulled.
+    if not payload.benchmark_cmd:
+        if not _verify_bypass_allowed(payload.candidate_id, _head_sha(), state.run_id):
+            print(
+                "error: commit-kept needs benchmark_cmd to independently verify the "
+                "keep; refusing (jidoka). Set SINDRI_ALLOW_UNVERIFIED_KEEP=1 to override.",
+                file=sys.stderr,
+            )
+            return 1
+        result = None
+    else:
+        result = _measure_candidate(state, payload.benchmark_cmd, payload.checks_cmd)
+
     sha = _kept_commit_sha(cand.name)
+    if sha is not None:
+        # Crash-recovery tier (b): a `kept:` commit exists but its record didn't land.
+        # The working tree == that commit, so the inline re-measurement above measured
+        # exactly it. Honor the recovery only if it re-measures as an improvement (a
+        # forged regression commit re-measures as not-improved → refuse).
+        if result is not None and not result["verified"] and not _verify_bypass_allowed(
+            payload.candidate_id, _head_sha(), state.run_id
+        ):
+            print(
+                f"error: found a `kept:` commit that does not re-measure as an "
+                f"improvement (status={result['status']}, reason={result['reason']}); "
+                f"refusing to record it as a keep. Investigate, or "
+                f"SINDRI_ALLOW_UNVERIFIED_KEEP=1 to override.",
+                file=sys.stderr,
+            )
+            return 1
+        if result is not None and result["verified"]:
+            payload = _with_verified(payload, result)
     if sha is None:
+        # New keep: commit ONLY if the independent re-measurement verifies this tree.
+        if result is not None and not result["verified"] and not _verify_bypass_allowed(
+            payload.candidate_id, _head_sha(), state.run_id
+        ):
+            print(
+                f"error: independent re-measurement did not verify an improvement "
+                f"(status={result['status']}, metric={result['metric_value']}, "
+                f"reason={result['reason']}); refusing keep (jidoka). Set "
+                f"SINDRI_ALLOW_UNVERIFIED_KEEP=1 to override.",
+                file=sys.stderr,
+            )
+            return 1
+        if result is not None and result["verified"]:
+            payload = _with_verified(payload, result)
+
         delta = payload.subagent_result.metric_value - payload.metric_before
         try:
             sha = commit_all_with_message(f"kept: {cand.name} (Δ{delta:+g})")

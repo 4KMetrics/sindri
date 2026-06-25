@@ -65,14 +65,33 @@ def _current_metric_before(repo: Path) -> float:
 
 
 def _apply_result(repo: Path, cand: dict, result: dict, metric_before: float) -> subprocess.CompletedProcess:
-    """Apply a result the way sindri-loop step 7 now does: commit-kept for an
-    improvement, reset-tree otherwise — the subcommand does the git op AND the
-    record in one call (no test-side git commit/reset)."""
+    """Apply a result the way sindri-loop now does: for an improvement, step 6b
+    INDEPENDENTLY verifies the benchmark before step 7 commits it; otherwise
+    reset-tree. The subcommand does the git op AND the record in one call."""
+    if result["status"] == "improved":
+        # Step 6b: the core re-measures the working tree before any keep.
+        v = _sindri(
+            repo, "verify-candidate",
+            stdin=json.dumps({
+                "candidate_id": cand["id"],
+                "benchmark_cmd": ".claude/scripts/sindri/benchmark.py",
+            }),
+        )
+        assert v.returncode == 0, v.stderr
+        assert json.loads(v.stdout)["verified"] is True, v.stdout
+        cmd = "commit-kept"
+    else:
+        cmd = "reset-tree"
     payload = build_record_payload(
         candidate_id=cand["id"], metric_before=metric_before,
         subagent_result=result, commit_sha=None,
     )
-    cmd = "commit-kept" if result["status"] == "improved" else "reset-tree"
+    if cmd == "commit-kept":
+        # commit-kept re-measures inline (the measurement authority) — give it the
+        # benchmark to do so.
+        d = json.loads(payload)
+        d["benchmark_cmd"] = ".claude/scripts/sindri/benchmark.py"
+        payload = json.dumps(d)
     r = _sindri(repo, cmd, stdin=payload)
     assert r.returncode == 0, r.stderr
     return r

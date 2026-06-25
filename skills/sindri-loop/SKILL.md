@@ -186,6 +186,27 @@ If `ACTUAL_BRANCH != EXPECTED_BRANCH` **or** `ACTUAL_SHA != EXPECTED_SHA`, the s
 
 This is **detection, not prevention**: it catches the realistic accident (a stray `checkout`/`reset`/local commit). It cannot detect or undo a `git push --force` to the remote — `HEAD` is unchanged in that case (detecting a remote clobber would need a `git ls-remote` snapshot before and after, a network round-trip per experiment, deliberately out of scope here).
 
+### 6b. Independent verification — the measurement seam (only when the subagent claims `improved`)
+
+The subagent both *applies* the change and *grades its own benchmark*. Never keep on that self-report. Re-measure with the backend, which runs the **trusted (committed) benchmark** itself and decides independently. This is the measurement twin of the git seam in 6a: the agent that proposes a win does not certify it.
+
+Only a claimed `improved` needs this (a revert discards regardless):
+
+```bash
+if [ "<status from step 6>" = "improved" ]; then
+  VERIFY=$(echo '{"candidate_id": <id>, "benchmark_cmd": "<benchmark path>", "checks_cmd": "<checks path or omit>"}' | "$FORGE" verify-candidate)
+  VERIFIED=$(printf '%s' "$VERIFY" | python3 -c "import json,sys; print(json.load(sys.stdin)['verified'])")
+  VSTATUS=$(printf '%s' "$VERIFY" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+fi
+```
+
+`verify-candidate` re-runs the benchmark `reps` times (remote mode = 1) and refuses if the instrument isn't trustworthy. It appends an **advisory** `verify` event used *only* for this keep-vs-reset decision — it is **not** a trust anchor (it returns `verified` plus an independently-measured `metric_value`; `commit-kept` re-measures authoritatively in step 7, so a forged event can't make a keep land).
+
+- **`VERIFIED == True`** → go to step 7 and `commit-kept` (which re-measures and commits the independent number).
+- **`VERIFIED == False`** (didn't reproduce, within noise, tampered, untracked, or errored) → **do not keep (jidoka — stop the line).** Substitute `VSTATUS` (e.g. `inconclusive`/`regressed`/`errored`) into the SubagentResult and take the `reset-tree` path in step 7. The disagreement is preserved in the jsonl.
+
+> **What the seam guarantees (and what it does not).** `commit-kept` is the single **measurement authority**: on a new keep it re-runs the *trusted (tracked, unmodified)* benchmark itself and commits *its own* measured number — it trusts no subagent-writable record (a forged `verify`/`experiment` jsonl line cannot make it commit; tier-a recovery additionally requires a real kept commit). It requires the benchmark/checks to be **tracked and unmodified vs `HEAD`** (instrument directory + no untracked siblings), and re-runs `checks` itself. It does **not** sandbox the benchmark's runtime: a benchmark that imports code from *outside* its directory, or reads out-of-repo state (a cache file, env, network), is outside v1's integrity guarantee — and a subagent can still poison non-keep state it writes to `.sindri/` (counters/termination), which `commit-kept` does not gate. Planned hardening: measure in an isolated, network-restricted worktree built from `HEAD` + the candidate diff, plus a 6a-style `.sindri/` integrity snapshot.
+
 ### 7. Apply the result (commit or revert) and record it
 
 `metric_before` is `state.current_best` if set, else `state.baseline.value`. Compose the RecordPayload from this experiment:
@@ -194,22 +215,29 @@ This is **detection, not prevention**: it catches the realistic accident (a stra
 {
   "candidate_id": <int, from step 4>,
   "metric_before": <float, from state.current_best or state.baseline.value>,
-  "subagent_result": <subagent JSON verbatim from step 6>
+  "subagent_result": <subagent JSON verbatim from step 6>,
+  "benchmark_cmd": "<benchmark path>",
+  "checks_cmd": "<checks path or omit>"
 }
 ```
+
+`commit-kept` needs `benchmark_cmd` (and optional `checks_cmd`) so it can re-measure inline; `reset-tree` ignores them.
 
 Pipe it to the backend subcommand for the result class — the subcommand does the git action **and** the pool-status + `current_best` + jsonl write in one validated, crash-safe call. **You no longer run `git commit` / `git reset` yourself** (that's exactly the LLM-authored git the seam removed):
 
 ```bash
-# improved      → commit-kept  (git-commits the kept change, records kept,
-#                 bumps current_best, captures the commit SHA in-process)
-# anything else → reset-tree   (git reset --hard HEAD, records the revert/dead-end)
-if [ "<status from step 6>" = "improved" ]; then
+# improved AND verified (6b) → commit-kept  (git-commits the kept change, records
+#                 kept, bumps current_best to the VERIFIED value, captures the SHA)
+# anything else / unverified → reset-tree   (git reset --hard HEAD, records the
+#                 revert/dead-end under the verified status)
+if [ "<status from step 6>" = "improved" ] && [ "$VERIFIED" = "True" ]; then
   echo "$PAYLOAD" | "$FORGE" commit-kept
 else
-  echo "$PAYLOAD" | "$FORGE" reset-tree
+  echo "$PAYLOAD" | "$FORGE" reset-tree   # PAYLOAD carries VSTATUS for an unverified "improved"
 fi
 ```
+
+`commit-kept` is the authority: it **re-runs the trusted benchmark itself** and refuses the keep unless *its own* re-measurement verifies the improvement — committing the independently-measured number, never the subagent's. It trusts no recorded `verify` event (those are subagent-writable), so even a forged event or a buggy orchestrator can't land a self-certified keep. (Emergency-only override: `SINDRI_ALLOW_UNVERIFIED_KEEP=1`, which records a loud `verify_bypassed` event.)
 
 The pool-status mapping is handled inside the subcommand: `improved → kept`, `regressed`/`inconclusive → reverted`, `check_failed → check_failed`, `errored`/`timeout → errored`. Both subcommands are **idempotent on a crash re-run** (they skip a candidate already recorded and never double-commit) and keep the jsonl-first ordering internally. If `commit-kept` finds the subagent claimed `improved` but left no net change, it records `errored` — no phantom keep.
 
@@ -260,3 +288,4 @@ Return. You are done. The next wakeup starts fresh at step 1.
 - **Never retry `check_failed`.** Tests are deterministic; retrying is theater.
 - **Never proceed without the run lock, and never `ScheduleWakeup` when you couldn't acquire it.** A failed `acquire-lock` means another wakeup owns this tick — back off silently.
 - **Never commit or reset when the step-6a tamper check fails.** If the subagent moved `HEAD` or switched branches, acting in step 7 lands the orchestrator on the wrong branch — abort the tick instead.
+- **Never keep on the subagent's self-reported metric.** A claimed `improved` is committed only after `verify-candidate` (6b) independently confirms it; an unverified claim is reset, not kept. The subagent measures for its *own* decision, but the committed number is one it did not produce.
