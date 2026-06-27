@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/4KMetrics/sindri/compare/v0.7.0...v0.7.1) (2026-06-27)
+
+
+### Documentation
+
+* README — note the measurement-integrity seam + security docs ([#75](https://github.com/4KMetrics/sindri/issues/75)) ([c1cbe7a](https://github.com/4KMetrics/sindri/commit/c1cbe7a53bca20da2762d5a891f08333f1c12951))
+
 ## [0.7.0](https://github.com/4KMetrics/sindri/compare/v0.6.0...v0.7.0) (2026-06-27)
 
 
