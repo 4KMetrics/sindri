@@ -141,6 +141,12 @@ Mark the candidate in-flight in the run log (so a crash mid-experiment is visibl
 "$FORGE" log-event --event candidate_dispatched --details "{\"candidate_id\": <id>, \"name\": \"<candidate name>\"}"
 ```
 
+Snapshot the run's protected state **after** that log-event and **before** handing control to the (untrusted) subagent. The expected value lives here in the orchestrator's tick context — the subagent can't forge it. Re-checked in step 6a:
+
+```bash
+EXPECTED_STATE_DIGEST=$("$FORGE" state-digest)
+```
+
 Invoke via `Task` tool:
 
 ```
@@ -186,6 +192,23 @@ If `ACTUAL_BRANCH != EXPECTED_BRANCH` **or** `ACTUAL_SHA != EXPECTED_SHA`, the s
 
 This is **detection, not prevention**: it catches the realistic accident (a stray `checkout`/`reset`/local commit). It cannot detect or undo a `git push --force` to the remote — `HEAD` is unchanged in that case (detecting a remote clobber would need a `git ls-remote` snapshot before and after, a network round-trip per experiment, deliberately out of scope here).
 
+### 6a-bis. Verify the subagent didn't touch `.sindri/` state
+
+The subagent can also write the run's state files directly (it has Bash) — forging `experiment`/`verify`/`terminated` records to poison the counters, the termination predicates, or the finalize accounting. Compare the snapshot from step 5 (the `.sindri` twin of the git check above):
+
+```bash
+if [ "$("$FORGE" state-digest)" != "$EXPECTED_STATE_DIGEST" ]; then
+  # The subagent wrote .sindri/current/ — abort the tick (jidoka).
+  "$FORGE" release-lock --token "$TOKEN"
+  # Surface: "sindri: aborting this tick — the experiment subagent altered .sindri/
+  #   state (jsonl/md changed unexpectedly). No commit made; state preserved in
+  #   .sindri/current/. Investigate before resuming."
+  # Do NOT ScheduleWakeup. Return.
+fi
+```
+
+The keep path is *already* safe without this (`commit-kept` re-measures and trusts no record); this guard protects the **non-keep** state — `experiments_run`, `consecutive_reverts`, the termination predicates, and the finalize summary — from a subagent that forges jsonl lines. The expected digest lives only in the orchestrator's tick context, so it can't be forged on disk.
+
 ### 6b. Independent verification — the measurement seam (only when the subagent claims `improved`)
 
 The subagent both *applies* the change and *grades its own benchmark*. Never keep on that self-report. Re-measure with the backend, which runs the **trusted (committed) benchmark** itself and decides independently. This is the measurement twin of the git seam in 6a: the agent that proposes a win does not certify it.
@@ -207,7 +230,7 @@ fi
 
 > **What the seam guarantees (and what it does not).** `commit-kept` is the single **measurement authority**: on a new keep it re-runs the *trusted (tracked, unmodified)* benchmark itself and commits *its own* measured number — it trusts no subagent-writable record (a forged `verify`/`experiment` jsonl line cannot make it commit; tier-a recovery additionally requires a real kept commit). The benchmark/checks must be **tracked and unmodified vs `HEAD`** (instrument directory + no untracked siblings), `checks` are re-run, and the measurement runs in an **isolated git worktree** checked out from the candidate's staged tracked tree — so untracked / gitignored cruft in the live working dir (a planted cache file, `.sindri` state, stray cwd files) cannot influence the metric, and the main tree/branch is never touched. Gitignored top-level dependency dirs (`node_modules`, `.venv`, …) are symlinked in so build-based benchmarks still run.
 >
-> Remaining residuals (v1): code the candidate legitimately edits is necessarily measured (inherent — that's the optimization); a benchmark reading **out-of-repo** state via an absolute path / env / network is not sandboxed (no network namespace); a benchmark that *writes* into a symlinked gitignored dep/build dir touches the live copy; and a subagent can still poison **non-keep** state it writes to `.sindri/` (counters/termination), which `commit-kept` does not gate. Next hardening: a 6a-style `.sindri/` integrity snapshot, and OS-level network/filesystem confinement of the benchmark process.
+> Non-keep state (counters, termination, finalize) is guarded separately by the **step 6a-bis `.sindri/` integrity snapshot** — a subagent that forges jsonl records aborts the tick. Remaining residuals (v1): code the candidate legitimately edits is necessarily measured (inherent — that's the optimization); a benchmark reading **out-of-repo** state via an absolute path / env / network is not sandboxed; and a benchmark that *writes* into a symlinked gitignored dep/build dir touches the live copy. Next hardening: OS-level network/filesystem confinement of the benchmark process (environment-level — run sindri in a sandbox/container).
 
 ### 7. Apply the result (commit or revert) and record it
 

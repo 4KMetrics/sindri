@@ -41,12 +41,17 @@ Round 1 found: TOCTOU (verify HEAD not tree), tier-b forgeable `kept:` subject, 
 - [x] `_measure_candidate` delegates the benchmark/checks runs to `_isolated_measure`.
 - [x] tests: gitignored-cache gaming defeated (works live, refused in isolation); no leftover worktrees.
 
-## Remaining residuals (next phase — OS-level, out of current scope)
+## `.sindri/` integrity snapshot (DONE)
+- [x] `core/state.py::state_digest` — sha256 of sindri.jsonl + sindri.md (+ unit tests).
+- [x] `state-digest` CLI verb (+ integration test); added to plugin-artifacts allowlist.
+- [x] orchestrator wiring (SKILL.md): snapshot in step 5 (after candidate_dispatched, before Task), re-check in step 6a-bis; mismatch ⇒ abort tick (jidoka). Expected digest lives in the orchestrator's tick context, not on disk ⇒ unforgeable.
+- Closes the non-keep poisoning class (counters / consecutive_reverts / termination / finalize) via a forged jsonl line.
+
+## Remaining residuals (genuinely OS-level / inherent — environment, not app logic)
 - Code the candidate legitimately edits is measured (inherent — that's the optimization).
-- Out-of-repo state via absolute path / env / network is not sandboxed (needs a network/filesystem namespace).
+- Out-of-repo state via absolute path / env / network is not sandboxed → run sindri in a sandbox/container (network/fs namespace); not buildable reliably in-process on macOS.
 - A benchmark writing into a symlinked gitignored dep/build dir touches the live copy.
-- jsonl poisoning of NON-keep state (counters/termination/finalize) via subagent writes to `.sindri/`. Fix: 6a-style `.sindri/` integrity snapshot in the orchestrator.
-All flagged in `sindri-loop/SKILL.md` (§6b guarantee note).
+All flagged in `sindri-loop/SKILL.md` §6b.
 
 ## Invariants preserved
 - jsonl-first ordering, idempotency tiers (a/b), single-writer lock, name-shell-safety, stdout-clean/stderr-diagnostics, exit-code conventions.

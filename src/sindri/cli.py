@@ -54,6 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_validate_benchmark(sub)
     _add_detect_mode(sub)
     _add_read_state(sub)
+    _add_state_digest(sub)
     _add_pick_next(sub)
     _add_record_result(sub)
     _add_check_termination(sub)
@@ -180,6 +181,23 @@ def _handle_read_state(args: argparse.Namespace) -> int:
         print("sindri: no active run (.sindri/current/ not found)")
         return 0
     print(state.model_dump_json())
+    return 0
+
+
+def _add_state_digest(sub: argparse._SubParsersAction) -> None:
+    sub.add_parser(
+        "state-digest",
+        help="print a sha256 fingerprint of .sindri/current state (sindri.jsonl + "
+        "sindri.md). Snapshot before dispatching the subagent; re-check after — a "
+        "change means it wrote protected state (6a-style integrity guard).",
+    )
+
+
+@_register("state-digest")
+def _handle_state_digest(args: argparse.Namespace) -> int:
+    from sindri.core.state import state_digest
+
+    print(state_digest())
     return 0
 
 

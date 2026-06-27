@@ -23,6 +23,28 @@ class StateIOError(Exception):
     """Raised when state files can't be read or are malformed."""
 
 
+def state_digest(*, dir: Path = Path(".sindri/current")) -> str:
+    """A sha256 fingerprint of the run's protected state (sindri.jsonl + sindri.md).
+
+    The orchestrator snapshots this before dispatching the (untrusted) experiment
+    subagent and re-checks it afterward — a change means the subagent wrote state it
+    must not (forged jsonl records/events poisoning counters/termination/keeps). This
+    is the .sindri twin of the step-6a git-tamper check; the expected value lives in
+    the orchestrator's tick context, not on disk, so the subagent can't forge it.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for name in ("sindri.jsonl", "sindri.md"):
+        p = dir / name
+        h.update(name.encode())
+        try:
+            h.update(b"\x00" + p.read_bytes() + b"\x00")
+        except OSError:
+            h.update(b"\x00<absent>\x00")
+    return h.hexdigest()
+
+
 _FRONTMATTER_DELIM = "---\n"
 
 # Type adapter for the JsonlRecord union — pydantic uses the discriminator `type`
