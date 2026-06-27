@@ -341,3 +341,29 @@ class TestWorktreeIsolation:
             ["git", "worktree", "list"], cwd=tmp_path, capture_output=True, text=True
         ).stdout.strip().splitlines()
         assert len(wts) == 1, wts  # only the main worktree remains
+
+
+class TestTierAReMeasure:
+    def test_tier_a_uses_remeasured_value_not_forged_record(self, tmp_path: Path) -> None:
+        # A real keep lands current_best=2.0; then the subagent FORGES the recorded
+        # magnitude to a much-better 0.001. On a tier-a re-run, commit-kept must
+        # re-measure the committed tree and keep current_best at the real 2.0.
+        _setup(tmp_path)
+        (tmp_path / "f.py").write_text("a = 1\nb = 2\n")  # real improvement (5 -> 2)
+        assert _run_cli("commit-kept", cwd=tmp_path, input=_payload(2.0)).returncode == 0
+        assert json.loads(_run_cli("read-state", cwd=tmp_path).stdout)["current_best"] == 2.0
+
+        jpath = tmp_path / ".sindri" / "current" / "sindri.jsonl"
+        forged = []
+        for ln in jpath.read_text().splitlines():
+            rec = json.loads(ln)
+            if rec.get("type") == "experiment":
+                rec["metric_after"] = 0.001  # forged "much better" magnitude
+            forged.append(json.dumps(rec))
+        jpath.write_text("\n".join(forged) + "\n")
+
+        r = _run_cli("commit-kept", cwd=tmp_path, input=_payload(2.0))  # tier-a re-run
+        assert r.returncode == 0, r.stderr
+        assert json.loads(r.stdout).get("skipped") is True
+        st = json.loads(_run_cli("read-state", cwd=tmp_path).stdout)
+        assert st["current_best"] == 2.0  # NOT the forged 0.001

@@ -187,9 +187,10 @@ def _handle_read_state(args: argparse.Namespace) -> int:
 def _add_state_digest(sub: argparse._SubParsersAction) -> None:
     sub.add_parser(
         "state-digest",
-        help="print a sha256 fingerprint of .sindri/current state (sindri.jsonl + "
-        "sindri.md). Snapshot before dispatching the subagent; re-check after — a "
-        "change means it wrote protected state (6a-style integrity guard).",
+        help="print a sha256 fingerprint of the ENTIRE .sindri/current/ dir (every "
+        "file: state, jsonl, lock, sentinels). Snapshot before dispatching the "
+        "subagent; re-check after — a change means it wrote protected state "
+        "(6a-style integrity guard).",
     )
 
 
@@ -697,11 +698,15 @@ def _kept_commit_sha(name: str, *, cwd: Path | None = None) -> str | None:
 
 
 def _reconcile_pool_from_record(
-    state, candidate_id: int, *, dir: Path = Path(".sindri/current")
+    state, candidate_id: int, *, measured: float | None = None, dir: Path = Path(".sindri/current")
 ) -> None:  # type: ignore[no-untyped-def]
-    """Complete a crash-interrupted write: set the candidate's pool status (+
-    current_best) from its already-appended jsonl record, WITHOUT appending a
-    duplicate. Idempotent."""
+    """Complete a crash-interrupted write: set the candidate's pool STATUS from its
+    already-appended jsonl record, WITHOUT appending a duplicate. Idempotent.
+
+    For an `improved` record, `current_best` is set from `measured` (an INDEPENDENT
+    re-measurement) — never from the subagent-writable `record.metric_after`. If the
+    record is improved but `measured` is None, `current_best` is left unchanged (the
+    recorded magnitude is not trusted)."""
     from sindri.core.state import read_jsonl, write_state
 
     rec = None
@@ -716,8 +721,8 @@ def _reconcile_pool_from_record(
         for c in state.pool
     ]
     updates: dict[str, object] = {"pool": new_pool}
-    if rec.status == "improved":
-        updates["current_best"] = rec.metric_after
+    if rec.status == "improved" and measured is not None:
+        updates["current_best"] = measured
     write_state(state.model_copy(update=updates))
 
 
@@ -844,12 +849,18 @@ def _isolated_measure(benchmark_cmd, checks_cmd, metric_name, reps, timeout):  #
     """Run benchmark (+checks) against a CLEAN checkout of the candidate's STAGED,
     tracked tree in a throwaway git worktree — isolated from the live working dir.
 
-    Isolates: untracked / gitignored cruft in the live tree (a planted cache file,
-    .sindri state, stray cwd files) cannot influence the metric, and the main tree
-    / branch is never touched. Gitignored top-level DEP directories (node_modules,
-    .venv, …) are symlinked in so real build-based benchmarks still run; .git and
-    .sindri are never linked, and gitignored FILES stay excluded. Returns
-    (samples, reason): reason None on success, else a fail-reason string.
+    What IS isolated: GITIGNORED files (a planted cache that's gitignored), `.git`,
+    and `.sindri` are excluded from the measured tree, and the main tree/branch is
+    never touched. Gitignored top-level DEP directories (node_modules, .venv, …) are
+    symlinked in so build-based benchmarks still run.
+
+    What is NOT isolated (honest limits): plain UNTRACKED files (incl. new files the
+    candidate creates) are staged by `git add -A` and ARE measured + committed into
+    the keep — the same class as the candidate's own edits, and visible in the kept
+    commit's diff for human review. The CONTENT of a symlinked gitignored dep/build
+    dir is also subagent-controlled and can influence the metric on read. (Switching
+    to tracked-only staging would block legitimate add-a-file candidates, so it's
+    deliberately not done.) Returns (samples, reason): reason None on success.
     """
     import os
     import shutil
@@ -955,11 +966,12 @@ def _measure_candidate(state, benchmark_cmd: str, checks_cmd: str | None):  # ty
       - the benchmark/checks must be TRACKED at HEAD,
       - they (and the benchmark's directory) must be UNMODIFIED vs HEAD,
       - the benchmark's directory must have no UNTRACKED files (a sibling it imports).
-    The measurement then runs in an ISOLATED worktree (HEAD + the candidate's staged
-    tracked tree; gitignored dep dirs symlinked so builds still work) — so the live
-    working dir's untracked/gitignored cruft can't influence the metric (§_isolated_measure).
-    Residual (v1): code the candidate edits is necessarily measured (inherent); and
-    a benchmark reading out-of-repo state (abs path / env / network) is not sandboxed.
+    The measurement then runs in an ISOLATED worktree (gitignored cruft + .git/.sindri
+    excluded; gitignored dep dirs symlinked so builds still work) — see _isolated_measure
+    for exactly what is and isn't isolated. Residuals (v1): the candidate's own edits
+    and any plain untracked files it creates are necessarily measured (inherent, visible
+    in the keep diff); symlinked dep-dir content is subagent-controlled; and a benchmark
+    reading out-of-repo state (abs path / env / network) is not sandboxed.
     """
     import subprocess
 
@@ -1151,8 +1163,15 @@ def _handle_commit_kept(args: argparse.Namespace) -> int:
     # but only honor an "improved" record if a REAL kept commit backs it, so a forged
     # jsonl line (the subagent can write the file) can't launder a fabricated keep.
     if _experiment_already_recorded(payload.candidate_id):
-        if not _recorded_experiment_improved(payload.candidate_id) or _kept_commit_sha(cand.name):
-            _reconcile_pool_from_record(state, payload.candidate_id)
+        improved = _recorded_experiment_improved(payload.candidate_id)
+        if not improved or _kept_commit_sha(cand.name):
+            # Never trust the recorded magnitude on recovery: re-measure the committed
+            # tree and set current_best from THAT (the record is subagent-writable).
+            measured = None
+            if improved and payload.benchmark_cmd:
+                res = _measure_candidate(state, payload.benchmark_cmd, payload.checks_cmd)
+                measured = res["metric_value"] if res["verified"] else None
+            _reconcile_pool_from_record(state, payload.candidate_id, measured=measured)
             print(json.dumps({"ok": True, "skipped": True, "reason": "already recorded"}))
             return 0
         # else: an "improved" record with no commit → not a real keep → fall through.
@@ -1297,6 +1316,17 @@ def _handle_init(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # Ensure .sindri/ is gitignored, so run state is never staged into a keep commit
+    # or pulled into the isolated measurement tree (a non-ignored .sindri would be
+    # both committed and measurable — an integrity hole).
+    gitignore = Path(".gitignore")
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    if not any(ln.strip().rstrip("/") == ".sindri" for ln in existing.splitlines()):
+        with gitignore.open("a") as f:
+            if existing and not existing.endswith("\n"):
+                f.write("\n")
+            f.write(".sindri/\n")
+
     # fullmatch rejects goals like "reduce x by 15% and make coffee" — `search`
     # used to silently consume only the prefix and drop the trailing junk.
     m = _GOAL_RE.fullmatch(args.goal)
@@ -1332,6 +1362,15 @@ def _handle_init(args: argparse.Namespace) -> int:
         pool = [Candidate(**c) for c in pool_raw]
     except Exception as e:
         print(f"error: invalid pool-json: {e}", file=sys.stderr)
+        return 1
+
+    names = [c.name for c in pool]
+    if len(names) != len(set(names)):
+        print(
+            "error: candidate names must be unique — kept commits and crash-recovery "
+            "key on the name (`kept: <name>`), so duplicates are ambiguous.",
+            file=sys.stderr,
+        )
         return 1
 
     script = Path(args.script)

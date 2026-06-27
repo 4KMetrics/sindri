@@ -625,6 +625,37 @@ class TestInit:
         )
         assert "sindri/" in result.stdout
 
+    @staticmethod
+    def _init_repo(tmp_path: Path) -> None:
+        (tmp_path / "README.md").write_text("# test\n")
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        (script_dir / "benchmark.py").write_text("print('METRIC bundle_bytes=100')\n")
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+
+    def test_init_rejects_duplicate_candidate_names(self, tmp_path: Path) -> None:
+        self._init_repo(tmp_path)
+        pool = json.dumps([
+            {"id": 1, "name": "dup", "expected_impact_pct": -10.0},
+            {"id": 2, "name": "dup", "expected_impact_pct": -5.0},
+        ])
+        r = _run_cli("init", "--goal", "reduce bundle_bytes by 15%", "--pool-json", pool, cwd=tmp_path)
+        assert r.returncode == 1
+        assert "unique" in r.stderr
+        assert not (tmp_path / ".sindri" / "current").exists()
+
+    def test_init_ensures_sindri_is_gitignored(self, tmp_path: Path) -> None:
+        self._init_repo(tmp_path)  # no .gitignore committed
+        pool = json.dumps([{"id": 1, "name": "a", "expected_impact_pct": -10.0}])
+        r = _run_cli("init", "--goal", "reduce bundle_bytes by 15%", "--pool-json", pool, cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        gi = (tmp_path / ".gitignore").read_text()
+        assert any(ln.strip().rstrip("/") == ".sindri" for ln in gi.splitlines())
+
     def test_init_warns_on_reduce_target_over_100pct(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("# test\n")
         script_dir = tmp_path / ".claude" / "scripts" / "sindri"
