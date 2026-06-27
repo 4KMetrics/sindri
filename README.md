@@ -2,7 +2,7 @@
 
 A Claude Code plugin for bounded, target-driven optimization loops.
 
-> In the myth, Sindri is the dwarf smith who forged Mjölnir by iterating under adversity — each hammer-strike tested, kept only if it survived. This plugin is the same pattern: make a change, benchmark it, keep it if it's better, revert otherwise, repeat until the target is hit or the pool of ideas is exhausted.
+> In the myth, Sindri is the dwarf smith who forged Mjölnir by iterating under adversity — each hammer-strike tested, kept only if it survived. This plugin is the same pattern: make a change, benchmark it, keep it **only if an independent re-measurement confirms it's better**, revert otherwise, repeat until the target is hit or the pool of ideas is exhausted.
 
 Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and [davebcn87/pi-autoresearch](https://github.com/davebcn87/pi-autoresearch), adapted to Claude Code.
 
@@ -82,8 +82,9 @@ discrete, self-describing commands (no router, no guessing which sub-verb exists
 - **Python core** (`src/sindri/`) — pure functions: statistics, state file I/O, git wrappers, pool ordering, termination predicates, PR body rendering.
 - **Skills** (`skills/sindri-*/SKILL.md`) — prose prompts for the decisions that need Claude's inference: scaffolding a benchmark, proposing a candidate pool, orchestrating the loop.
 - **Subagent prompt** (`prompts/experiment-subagent.md`) — the contract every experiment subagent follows. Fresh context per experiment, no context bleed.
+- **Measurement integrity** — a keep is committed on a re-measurement the backend runs *itself* (the trusted, tracked benchmark, in an isolated worktree), never the experiment agent's self-report. The agent proposes a win; vetted code certifies it.
 
-See [`docs/superpowers/specs/2026-04-19-sindri-design.md`](docs/superpowers/specs/2026-04-19-sindri-design.md) for the full design.
+See [`docs/superpowers/specs/2026-04-19-sindri-design.md`](docs/superpowers/specs/2026-04-19-sindri-design.md) for the full design, and [`docs/security.md`](docs/security.md) for the secret-scanning / leak-prevention setup.
 
 ## Development
 
