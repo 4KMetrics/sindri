@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/4KMetrics/sindri/compare/v0.6.0...v0.7.0) (2026-06-27)
+
+
+### Features
+
+* close the measurement seam — commit-kept re-measures inline ([#71](https://github.com/4KMetrics/sindri/issues/71)) ([68e4256](https://github.com/4KMetrics/sindri/commit/68e4256baa43ef133f9561c95f7db71dcb6b78ca))
+
+
+### Bug Fixes
+
+* resolve four v0.6.0 dogfood bugs ([#67](https://github.com/4KMetrics/sindri/issues/67)–[#70](https://github.com/4KMetrics/sindri/issues/70)) ([#74](https://github.com/4KMetrics/sindri/issues/74)) ([e0ffbe1](https://github.com/4KMetrics/sindri/commit/e0ffbe13720e525d924d2cad32b76ed0a6972116))
+
 ## [0.6.0](https://github.com/4KMetrics/sindri/compare/v0.5.1...v0.6.0) (2026-06-20)
 
 
