@@ -43,7 +43,7 @@ If it exits non-zero: return `status: check_failed`. Do not proceed.
 Run `benchmark_cmd` 1 to `reps_policy.max` times, adaptively:
 
 - **Mode `remote`**: run exactly 1 rep. `remote` metrics (CI time, deploys) are expensive; one reading is the budget.
-- **Mode `local`**: start with `reps_policy.min` reps. Compute `delta = (mean - current_best) * (-1 if direction == "reduce" else 1)`. Compute `confidence_ratio = abs(delta) / max(noise_floor, 1e-9)`. If `confidence_ratio >= reps_policy.confidence_threshold`, stop. Otherwise add reps (up to `max`) until confident or max hit.
+- **Mode `local`**: start with `reps_policy.min` reps. Compute `delta = (mean - current_best) * (-1 if direction == "reduce" else 1)`. Compute `confidence_ratio = abs(delta) / max(noise_floor, 1e-6)` (the `1e-6` epsilon matches the backend's `noise.EPSILON`, so your advisory number agrees with the authoritative one). If `confidence_ratio >= reps_policy.confidence_threshold`, stop. Otherwise add reps (up to `max`) until confident or max hit.
 
 Parse the `METRIC <name>=<number>` line from each run (stdout last line). Ignore stderr.
 

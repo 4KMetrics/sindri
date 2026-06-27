@@ -437,6 +437,14 @@ def _handle_archive(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    # Drop transient files so the archive holds only the durable run record
+    # (sindri.md, sindri.jsonl, pr-body.md) — not the lock sidecar or state backups.
+    for name in (".RUNNING.acquire", "RUNNING"):
+        (current / name).unlink(missing_ok=True)
+    for pat in ("*.bak", "*.tmp"):
+        for p in current.glob(pat):
+            p.unlink()
+
     archive_name = f"{date.today().isoformat()}-{slug}"
     archive_dir = Path(".sindri") / "archive" / archive_name
     archive_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -1467,8 +1475,8 @@ def _handle_init(args: argparse.Namespace) -> int:
         )
     )
     for i, v in enumerate(samples, start=1):
-        append_jsonl(JsonlBaseline(ts=now, run_index=i, value=v, is_warmup=(i == 1)))
-    append_jsonl(JsonlBaselineComplete(ts=now, mean=mean_val, noise_floor=sigma))
+        append_jsonl(JsonlBaseline(ts=now, run_id=run_id, run_index=i, value=v, is_warmup=(i == 1)))
+    append_jsonl(JsonlBaselineComplete(ts=now, run_id=run_id, mean=mean_val, noise_floor=sigma))
 
     print(
         json.dumps(
