@@ -24,24 +24,37 @@ class StateIOError(Exception):
 
 
 def state_digest(*, dir: Path = Path(".sindri/current")) -> str:
-    """A sha256 fingerprint of the run's protected state (sindri.jsonl + sindri.md).
+    """A sha256 fingerprint of the run's ENTIRE protected-state directory.
 
     The orchestrator snapshots this before dispatching the (untrusted) experiment
     subagent and re-checks it afterward — a change means the subagent wrote state it
-    must not (forged jsonl records/events poisoning counters/termination/keeps). This
-    is the .sindri twin of the step-6a git-tamper check; the expected value lives in
-    the orchestrator's tick context, not on disk, so the subagent can't forge it.
+    must not: forged jsonl records/events (poisoning counters/termination/keeps), or
+    a planted ``HALT`` (forcing a premature terminate/finalize), or any other file.
+    This is the .sindri twin of the step-6a git-tamper check; the expected value
+    lives in the orchestrator's tick context, not on disk, so it can't be forged.
+
+    Hashes every file under ``dir`` (sorted by relative path) — name + bytes. Nothing
+    in ``.sindri/current/`` legitimately changes between dispatch and the re-check
+    (the lock ``RUNNING`` is written at acquire, before the snapshot), so any delta is
+    attributable to the subagent. (A concurrent ``/sindri:stop`` also trips it; that's
+    benign — the tick aborts and the HALT is honored on the next wakeup.)
     """
     import hashlib
 
     h = hashlib.sha256()
-    for name in ("sindri.jsonl", "sindri.md"):
-        p = dir / name
-        h.update(name.encode())
+    if not dir.exists():
+        h.update(b"<absent>")
+        return h.hexdigest()
+    for p in sorted(dir.rglob("*")):
+        if not p.is_file():
+            continue
+        h.update(p.relative_to(dir).as_posix().encode())
+        h.update(b"\x00")
         try:
-            h.update(b"\x00" + p.read_bytes() + b"\x00")
+            h.update(p.read_bytes())
         except OSError:
-            h.update(b"\x00<absent>\x00")
+            h.update(b"<unreadable>")
+        h.update(b"\x00")
     return h.hexdigest()
 
 

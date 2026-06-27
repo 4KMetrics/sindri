@@ -69,3 +69,14 @@ def test_cli_state_digest_changes_after_forged_append(tmp_path: Path) -> None:
     with (d / "sindri.jsonl").open("a") as f:
         f.write('{"forged": "improved"}\n')
     assert digest() != before
+
+
+def test_changes_when_halt_sentinel_planted(tmp_path: Path) -> None:
+    # A subagent planting HALT (to force premature terminate/finalize) must be
+    # caught by the whole-dir digest, even though jsonl/md are untouched.
+    d = _d(tmp_path)
+    (d / "sindri.jsonl").write_text('{"a": 1}\n')
+    (d / "sindri.md").write_text("---\n")
+    before = state_digest(dir=d)
+    (d / "HALT").write_text("")
+    assert state_digest(dir=d) != before
