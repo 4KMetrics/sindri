@@ -277,3 +277,67 @@ class TestMeasurementSeamHardening:
         subprocess.run(["git", "commit", "-m", "kept: a (Δ-999)"], cwd=tmp_path, check=True, capture_output=True)
         r = _run_cli("commit-kept", cwd=tmp_path, input=_payload(0.0))
         assert r.returncode != 0
+
+
+# A benchmark that a planted gitignored cache file can rig — to prove worktree
+# isolation excludes such files from the measured tree.
+_BENCH_CACHE = (
+    "import pathlib\n"
+    "if pathlib.Path('cache.txt').exists():\n"
+    "    print('METRIC lines=0')  # rigged by an out-of-tree (gitignored) file\n"
+    "else:\n"
+    "    n = len([l for l in pathlib.Path('f.py').read_text().splitlines() if l.strip()])\n"
+    "    print(f'METRIC lines={n}')\n"
+)
+
+
+def _setup_cache_bench(tmp_path: Path) -> None:
+    from sindri.core.state import write_state
+    from sindri.core.validators import Baseline, Candidate, Goal, Guardrails, SindriState
+
+    subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+    subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+    (tmp_path / "f.py").write_text("a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n")  # 5 lines
+    bench = tmp_path / _BENCH_PATH
+    bench.parent.mkdir(parents=True, exist_ok=True)
+    bench.write_text(_BENCH_CACHE)
+    (tmp_path / ".gitignore").write_text(".sindri/\ncache.txt\n")
+    subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+    subprocess.run(["git", "commit", "-m", "base"], check=True, cwd=tmp_path, capture_output=True)
+    state = SindriState(
+        goal=Goal(metric_name="lines", direction="reduce", target_pct=10.0),
+        baseline=Baseline(value=5.0, noise_floor=0.1, samples=[5.0, 5.0]),
+        pool=[Candidate(id=1, name="a", expected_impact_pct=-40.0)],
+        branch="sindri/test",
+        started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+        guardrails=Guardrails(mode="local"),
+        mode="local",
+    )
+    write_state(state, dir=tmp_path / ".sindri" / "current")
+
+
+class TestWorktreeIsolation:
+    def test_gitignored_cache_cannot_rig_the_measurement(self, tmp_path: Path) -> None:
+        _setup_cache_bench(tmp_path)
+        # No real improvement (f.py still 5 lines), but plant a gitignored cache
+        # file that rigs the benchmark to report 0 in the LIVE tree.
+        (tmp_path / "cache.txt").write_text("rig")
+        live = subprocess.run(
+            [sys.executable, _BENCH_PATH], cwd=tmp_path, capture_output=True, text=True
+        ).stdout
+        assert "lines=0" in live  # the attack works in the live working dir...
+        # ...but commit-kept measures in an isolated worktree (no gitignored cache),
+        # sees the true 5 lines, and refuses the keep.
+        r = _run_cli("commit-kept", cwd=tmp_path, input=_payload(0.0))
+        assert r.returncode != 0
+        assert _kept_commits(tmp_path) == []
+
+    def test_no_leftover_worktrees_after_measurement(self, tmp_path: Path) -> None:
+        _setup(tmp_path)
+        (tmp_path / "f.py").write_text("a = 1\n")  # real improvement
+        assert _run_cli("commit-kept", cwd=tmp_path, input=_payload(1.0)).returncode == 0
+        wts = subprocess.run(
+            ["git", "worktree", "list"], cwd=tmp_path, capture_output=True, text=True
+        ).stdout.strip().splitlines()
+        assert len(wts) == 1, wts  # only the main worktree remains

@@ -822,6 +822,109 @@ def _head_sha() -> str:
         return ""
 
 
+def _isolated_measure(benchmark_cmd, checks_cmd, metric_name, reps, timeout):  # type: ignore[no-untyped-def]
+    """Run benchmark (+checks) against a CLEAN checkout of the candidate's STAGED,
+    tracked tree in a throwaway git worktree — isolated from the live working dir.
+
+    Isolates: untracked / gitignored cruft in the live tree (a planted cache file,
+    .sindri state, stray cwd files) cannot influence the metric, and the main tree
+    / branch is never touched. Gitignored top-level DEP directories (node_modules,
+    .venv, …) are symlinked in so real build-based benchmarks still run; .git and
+    .sindri are never linked, and gitignored FILES stay excluded. Returns
+    (samples, reason): reason None on success, else a fail-reason string.
+    """
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    from sindri.core.metric import MetricParseError, parse_metric_line
+
+    samples: list[float] = []
+
+    # Stage the candidate's tree (git add -A excludes gitignored paths like .sindri),
+    # snapshot it, and wrap it in a dangling commit to check out into the worktree.
+    if subprocess.run(["git", "add", "-A"], capture_output=True).returncode != 0:
+        return samples, "worktree_setup_failed"
+    tree_p = subprocess.run(["git", "write-tree"], capture_output=True, text=True)
+    if tree_p.returncode != 0:
+        return samples, "worktree_setup_failed"
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "sindri", "GIT_AUTHOR_EMAIL": "sindri@local",
+        "GIT_COMMITTER_NAME": "sindri", "GIT_COMMITTER_EMAIL": "sindri@local",
+    }
+    commit_p = subprocess.run(
+        ["git", "commit-tree", tree_p.stdout.strip(), "-p", "HEAD", "-m", "sindri-measure"],
+        capture_output=True, text=True, env=env,
+    )
+    if commit_p.returncode != 0:
+        return samples, "worktree_setup_failed"
+    commit = commit_p.stdout.strip()
+
+    wt = tempfile.mkdtemp(prefix="sindri-measure-")
+    try:
+        if subprocess.run(
+            ["git", "worktree", "add", "--detach", wt, commit], capture_output=True
+        ).returncode != 0:
+            return samples, "worktree_setup_failed"
+
+        # Symlink gitignored top-level dependency dirs (node_modules, .venv, …) so
+        # build-based benchmarks work — without pulling in the live tree's untracked
+        # source or a planted cache file (those are excluded by construction).
+        repo_root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+        ).stdout.strip()
+        if repo_root:
+            for name in os.listdir(repo_root):
+                if name in (".git", ".sindri"):
+                    continue
+                src = os.path.join(repo_root, name)
+                dst = os.path.join(wt, name)
+                if not os.path.isdir(src) or os.path.exists(dst):
+                    continue  # gitignored FILES (e.g. a planted cache) stay excluded
+                if subprocess.run(
+                    ["git", "check-ignore", "-q", name], capture_output=True
+                ).returncode == 0:
+                    try:
+                        os.symlink(src, dst)
+                    except OSError:
+                        pass
+
+        for _ in range(reps):
+            try:
+                proc = subprocess.run(
+                    [sys.executable, benchmark_cmd], cwd=wt,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return samples, "timeout"
+            if proc.returncode != 0:
+                return samples, "benchmark_nonzero"
+            try:
+                _, value = parse_metric_line(proc.stdout, expected_name=metric_name)
+            except MetricParseError:
+                return samples, "no_metric_line"
+            samples.append(value)
+
+        if checks_cmd:
+            try:
+                cp = subprocess.run(
+                    [sys.executable, checks_cmd], cwd=wt,
+                    capture_output=True, text=True, timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return samples, "checks_timeout"
+            if cp.returncode != 0:
+                return samples, "checks_failed"
+
+        return samples, None
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True)
+        shutil.rmtree(wt, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], capture_output=True)
+
+
 def _measure_candidate(state, benchmark_cmd: str, checks_cmd: str | None):  # type: ignore[no-untyped-def]
     """Independently measure the candidate in the working tree with the TRUSTED
     (tracked, unmodified) benchmark and decide. THE single measurement authority.
@@ -834,12 +937,14 @@ def _measure_candidate(state, benchmark_cmd: str, checks_cmd: str | None):  # ty
       - the benchmark/checks must be TRACKED at HEAD,
       - they (and the benchmark's directory) must be UNMODIFIED vs HEAD,
       - the benchmark's directory must have no UNTRACKED files (a sibling it imports).
-    Residual (v1, not sandboxed): a benchmark importing code OUTSIDE its directory,
-    or reading out-of-repo state (cache/env/network), is not isolated — see SKILL.md.
+    The measurement then runs in an ISOLATED worktree (HEAD + the candidate's staged
+    tracked tree; gitignored dep dirs symlinked so builds still work) — so the live
+    working dir's untracked/gitignored cruft can't influence the metric (§_isolated_measure).
+    Residual (v1): code the candidate edits is necessarily measured (inherent); and
+    a benchmark reading out-of-repo state (abs path / env / network) is not sandboxed.
     """
     import subprocess
 
-    from sindri.core.metric import MetricParseError, parse_metric_line
     from sindri.core.noise import sample_mean
     from sindri.core.verify import decide_verification
 
@@ -879,31 +984,9 @@ def _measure_candidate(state, benchmark_cmd: str, checks_cmd: str | None):  # ty
         if others:
             return fail("benchmark_untracked")
 
-    samples: list[float] = []
-    for _ in range(reps):
-        try:
-            proc = subprocess.run(
-                [sys.executable, benchmark_cmd], capture_output=True, text=True, timeout=timeout
-            )
-        except subprocess.TimeoutExpired:
-            return fail("timeout", len(samples))
-        if proc.returncode != 0:
-            return fail("benchmark_nonzero", len(samples))
-        try:
-            _, value = parse_metric_line(proc.stdout, expected_name=metric_name)
-        except MetricParseError:
-            return fail("no_metric_line", len(samples))
-        samples.append(value)
-
-    if checks_cmd:
-        try:
-            cp = subprocess.run(
-                [sys.executable, checks_cmd], capture_output=True, text=True, timeout=timeout
-            )
-        except subprocess.TimeoutExpired:
-            return fail("checks_timeout", len(samples))
-        if cp.returncode != 0:
-            return fail("checks_failed", len(samples))
+    samples, reason = _isolated_measure(benchmark_cmd, checks_cmd, metric_name, reps, timeout)
+    if reason is not None:
+        return fail(reason, len(samples))
 
     mean = sample_mean(samples)
     d = decide_verification(

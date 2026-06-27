@@ -36,10 +36,17 @@ Round 1 found: TOCTOU (verify HEAD not tree), tier-b forgeable `kept:` subject, 
 - tier-a honors an "improved" record only if a real `kept:` commit backs it; tier-b re-measures the committed tree.
 - `commit-kept` payload carries `benchmark_cmd`/`checks_cmd`.
 
-## Documented residuals (NOT closed in this scope — would need the "Full sandbox" option)
-- Out-of-repo gaming: a benchmark importing code outside its dir, or reading a cache/env/network, isn't sandboxed. Fix: measure in an isolated worktree (HEAD + candidate diff).
-- jsonl poisoning of non-keep state (counters/termination/finalize) via subagent writes to `.sindri/`. Fix: 6a-style `.sindri/` integrity snapshot in the orchestrator.
-Both are flagged in `sindri-loop/SKILL.md` (§6b guarantee note) and tracked as the next phase.
+## Worktree-isolation phase (DONE)
+- [x] `_isolated_measure` — measurement runs in a throwaway git worktree checked out from the candidate's STAGED tracked tree (gitignored cruft excluded; gitignored top-level dep dirs symlinked so build benchmarks work; `.git`/`.sindri` never linked; auto-cleanup + prune).
+- [x] `_measure_candidate` delegates the benchmark/checks runs to `_isolated_measure`.
+- [x] tests: gitignored-cache gaming defeated (works live, refused in isolation); no leftover worktrees.
+
+## Remaining residuals (next phase — OS-level, out of current scope)
+- Code the candidate legitimately edits is measured (inherent — that's the optimization).
+- Out-of-repo state via absolute path / env / network is not sandboxed (needs a network/filesystem namespace).
+- A benchmark writing into a symlinked gitignored dep/build dir touches the live copy.
+- jsonl poisoning of NON-keep state (counters/termination/finalize) via subagent writes to `.sindri/`. Fix: 6a-style `.sindri/` integrity snapshot in the orchestrator.
+All flagged in `sindri-loop/SKILL.md` (§6b guarantee note).
 
 ## Invariants preserved
 - jsonl-first ordering, idempotency tiers (a/b), single-writer lock, name-shell-safety, stdout-clean/stderr-diagnostics, exit-code conventions.
