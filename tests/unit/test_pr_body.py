@@ -125,3 +125,30 @@ class TestRenderPrBody:
     def test_output_is_nonempty_even_with_zero_experiments(self) -> None:
         body = render_pr_body(_state(), _records()[:1])
         assert len(body) > 0
+
+
+def test_footer_links_to_source_repo() -> None:
+    # #68: footer must point at the real repo, not the 404'ing anthropics/sindri.
+    body = render_pr_body(_state(), _records())
+    assert "4KMetrics/sindri" in body
+    assert "anthropics/sindri" not in body
+
+
+def _deterministic_state() -> SindriState:
+    return _state().model_copy(
+        update={"baseline": Baseline(value=30.0, noise_floor=0.0, samples=[30.0, 30.0])}
+    )
+
+
+def test_deterministic_confidence_renders_as_infinity() -> None:
+    # #70: noise_floor == 0 → confidence is a meaningless sentinel; render ∞, not 1e7.
+    recs = _records()
+    recs[1] = recs[1].model_copy(update={"confidence_ratio": 1e7})  # the kept experiment
+    body = render_pr_body(_deterministic_state(), recs)
+    assert "∞" in body
+    assert "10000000" not in body
+
+
+def test_nondeterministic_confidence_stays_numeric() -> None:
+    body = render_pr_body(_state(), _records())  # real noise floor (870)
+    assert "94.2×" in body

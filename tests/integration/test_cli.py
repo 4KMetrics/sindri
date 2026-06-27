@@ -500,6 +500,38 @@ class TestArchive:
         assert "reduce-x-15pct" in subdirs[0].name
         assert (subdirs[0] / "sindri.md").exists()
 
+    def test_archive_drops_transient_files(self, tmp_path: Path) -> None:
+        # #69: lock sidecar + state backup must not leak into the archived record.
+        from datetime import datetime, timezone
+
+        from sindri.core.state import write_state
+        from sindri.core.validators import Baseline, Candidate, Goal, Guardrails, SindriState
+
+        state = SindriState(
+            goal=Goal(metric_name="x", direction="reduce", target_pct=15.0),
+            baseline=Baseline(value=100.0, noise_floor=1.0, samples=[100.0, 101.0, 99.0]),
+            pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
+            branch="sindri/reduce-x-15pct",
+            started_at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+            guardrails=Guardrails(mode="local"),
+            mode="local",
+        )
+        current = tmp_path / ".sindri" / "current"
+        write_state(state, dir=current)
+        (current / ".RUNNING.acquire").write_text("")     # lock sidecar
+        (current / "sindri.md.bak").write_text("old")      # crash-safety backup
+        (current / "sindri.jsonl").write_text(
+            '{"type":"event","ts":"2026-04-19T10:00:00+00:00","event":"x"}\n'
+        )
+
+        r = _run_cli("archive", cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        archived = next((tmp_path / ".sindri" / "archive").iterdir())
+        names = {p.name for p in archived.iterdir()}
+        assert ".RUNNING.acquire" not in names
+        assert "sindri.md.bak" not in names
+        assert {"sindri.md", "sindri.jsonl"} <= names  # durable record kept
+
     def test_no_current_fails(self, tmp_path: Path) -> None:
         r = _run_cli("archive", cwd=tmp_path)
         assert r.returncode != 0
@@ -655,6 +687,24 @@ class TestInit:
         assert r.returncode == 0, r.stderr
         gi = (tmp_path / ".gitignore").read_text()
         assert any(ln.strip().rstrip("/") == ".sindri" for ln in gi.splitlines())
+
+    def test_init_threads_run_id_into_baseline_records(self, tmp_path: Path) -> None:
+        # #67: baseline + baseline_complete records must carry the run's id, like
+        # session_start does — otherwise they can't be correlated in a shared log.
+        self._init_repo(tmp_path)
+        pool = json.dumps([{"id": 1, "name": "a", "expected_impact_pct": -10.0}])
+        r = _run_cli("init", "--goal", "reduce bundle_bytes by 15%", "--pool-json", pool, cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        by_type: dict[str, list] = {}
+        for ln in (tmp_path / ".sindri" / "current" / "sindri.jsonl").read_text().splitlines():
+            if ln.strip():
+                rec = json.loads(ln)
+                by_type.setdefault(rec["type"], []).append(rec)
+        run_id = by_type["session_start"][0]["run_id"]
+        assert run_id  # non-empty
+        baseline_recs = by_type.get("baseline", []) + by_type.get("baseline_complete", [])
+        assert baseline_recs  # they exist
+        assert all(rec["run_id"] == run_id for rec in baseline_recs)
 
     def test_init_warns_on_reduce_target_over_100pct(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("# test\n")
