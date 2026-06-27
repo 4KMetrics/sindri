@@ -10,10 +10,10 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 VALID_CLI_SUBCOMMANDS = {
-    "init", "validate-benchmark", "detect-mode", "read-state", "pick-next",
+    "init", "validate-benchmark", "detect-mode", "read-state", "state-digest", "pick-next",
     "record-result", "check-termination", "generate-pr-body", "archive", "status",
     "acquire-lock", "release-lock", "record-terminated", "reset-tree", "commit-kept",
-    "push-branch", "log-event",
+    "verify-candidate", "push-branch", "log-event",
 }
 
 

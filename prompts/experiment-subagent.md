@@ -92,13 +92,16 @@ Field rules:
 - **Do not `git push`.** Ever.
 - **Do not write to `.sindri/`** — `sindri.md`, `sindri.jsonl`, or any subdirectory. The orchestrator owns that state.
 - **Do not mutate files outside the current working tree.** No `~/`, no `/tmp` writes that affect the repo.
+- **Do not modify the benchmark or checks scripts.** They are the trusted measurement instrument. The orchestrator independently re-runs the *committed* benchmark to verify any improvement (and refuses the keep if the script changed vs `HEAD`), so editing them cannot help — it only gets the candidate rejected as `benchmark_tampered`.
 - **Do not call `ScheduleWakeup`.** Only the orchestrator schedules.
 - **Do not dispatch further `Task` subagents.** You are the leaf of the tree.
 
 ## What the orchestrator does after you return
 
-- On `improved`: `git add -A && git commit`. Your changes become a kept commit.
+- On `improved`: it **independently re-runs the benchmark itself** (the measurement seam). Only if that confirms the win does it `git commit` your change as a kept commit — and it commits *its own* measured number, not yours. If its re-measurement disagrees (within noise, regressed, or the benchmark was altered), your change is **reset, not kept**.
 - On anything else: `git reset --hard HEAD`. Your changes are discarded.
+
+Your `metric_value`/`status` drive the loop's revert counters and your own stop decision, but they are **advisory for a keep** — measure honestly; gaming the number only wastes the experiment, because the keep is decided by an independent re-measurement.
 
 So if you write extra debug files or touch unrelated paths, they get reverted on non-improvement, but may leak into a kept commit on success. **Keep your edits tight to what the candidate demands.**
 

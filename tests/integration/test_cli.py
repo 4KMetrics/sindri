@@ -625,6 +625,37 @@ class TestInit:
         )
         assert "sindri/" in result.stdout
 
+    @staticmethod
+    def _init_repo(tmp_path: Path) -> None:
+        (tmp_path / "README.md").write_text("# test\n")
+        script_dir = tmp_path / ".claude" / "scripts" / "sindri"
+        script_dir.mkdir(parents=True)
+        (script_dir / "benchmark.py").write_text("print('METRIC bundle_bytes=100')\n")
+        subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
+        subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+
+    def test_init_rejects_duplicate_candidate_names(self, tmp_path: Path) -> None:
+        self._init_repo(tmp_path)
+        pool = json.dumps([
+            {"id": 1, "name": "dup", "expected_impact_pct": -10.0},
+            {"id": 2, "name": "dup", "expected_impact_pct": -5.0},
+        ])
+        r = _run_cli("init", "--goal", "reduce bundle_bytes by 15%", "--pool-json", pool, cwd=tmp_path)
+        assert r.returncode == 1
+        assert "unique" in r.stderr
+        assert not (tmp_path / ".sindri" / "current").exists()
+
+    def test_init_ensures_sindri_is_gitignored(self, tmp_path: Path) -> None:
+        self._init_repo(tmp_path)  # no .gitignore committed
+        pool = json.dumps([{"id": 1, "name": "a", "expected_impact_pct": -10.0}])
+        r = _run_cli("init", "--goal", "reduce bundle_bytes by 15%", "--pool-json", pool, cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        gi = (tmp_path / ".gitignore").read_text()
+        assert any(ln.strip().rstrip("/") == ".sindri" for ln in gi.splitlines())
+
     def test_init_warns_on_reduce_target_over_100pct(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("# test\n")
         script_dir = tmp_path / ".claude" / "scripts" / "sindri"
@@ -961,16 +992,27 @@ class TestResetTree:
         assert "Traceback" not in r.stderr
 
 
+_BENCH = (
+    "import pathlib\n"
+    "n = len([l for l in pathlib.Path('f.py').read_text().splitlines() if l.strip()])\n"
+    "print(f'METRIC lines={n}')\n"
+)
+_BENCH_PATH = ".claude/scripts/sindri/benchmark.py"
+
+
 class TestCommitKept:
     @staticmethod
-    def _improved_payload(metric_value: float = 900.0) -> str:
-        return json.dumps({
-            "candidate_id": 1, "metric_before": 1000.0,
+    def _improved_payload(metric_value: float = 900.0, *, benchmark: bool = True) -> str:
+        body = {
+            "candidate_id": 1, "metric_before": 3.0,
             "subagent_result": {
                 "metric_value": metric_value, "reps_used": 3, "confidence_ratio": 5.0,
                 "status": "improved", "files_modified": ["f.py"],
             },
-        })
+        }
+        if benchmark:
+            body["benchmark_cmd"] = _BENCH_PATH  # commit-kept re-measures with this
+        return json.dumps(body)
 
     @staticmethod
     def _setup(tmp_path: Path) -> None:
@@ -988,13 +1030,16 @@ class TestCommitKept:
         subprocess.run(["git", "init", "-b", "main"], check=True, cwd=tmp_path, capture_output=True)
         subprocess.run(["git", "config", "user.email", "t@t"], check=True, cwd=tmp_path)
         subprocess.run(["git", "config", "user.name", "t"], check=True, cwd=tmp_path)
-        (tmp_path / "f.py").write_text("x = 1\n")
+        (tmp_path / "f.py").write_text("a = 1\nb = 2\nc = 3\n")  # 3 non-blank lines == baseline
+        bench = tmp_path / _BENCH_PATH
+        bench.parent.mkdir(parents=True, exist_ok=True)
+        bench.write_text(_BENCH)
         (tmp_path / ".gitignore").write_text(".sindri/\n")
         subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
         subprocess.run(["git", "commit", "-m", "base"], check=True, cwd=tmp_path, capture_output=True)
         state = SindriState(
             goal=Goal(metric_name="lines", direction="reduce", target_pct=10.0),
-            baseline=Baseline(value=1000.0, noise_floor=1.0, samples=[1000.0, 1001.0, 999.0]),
+            baseline=Baseline(value=3.0, noise_floor=0.1, samples=[3.0, 3.0]),
             pool=[Candidate(id=1, name="a", expected_impact_pct=-10.0)],
             branch="sindri/test",
             started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
@@ -1017,12 +1062,13 @@ class TestCommitKept:
 
     def test_commits_and_records(self, tmp_path: Path) -> None:
         self._setup(tmp_path)
-        (tmp_path / "f.py").write_text("")  # the kept improvement (fewer lines)
+        (tmp_path / "f.py").write_text("a = 1\n")  # 3 -> 1 line: a real improvement
+        # Subagent claims 900.0; commit-kept re-measures → commits the real 1.0.
         r = _run_cli("commit-kept", cwd=tmp_path, input=self._improved_payload())
         assert r.returncode == 0, r.stderr
         out = json.loads(r.stdout)
         assert out["new_status"] == "kept"
-        assert out["current_best"] == 900.0
+        assert out["current_best"] == 1.0
         assert len(self._kept_commits(tmp_path)) == 1
         assert out["commit_sha"]
         state = json.loads(_run_cli("read-state", cwd=tmp_path).stdout)
@@ -1031,7 +1077,7 @@ class TestCommitKept:
     def test_rejects_non_improved(self, tmp_path: Path) -> None:
         self._setup(tmp_path)
         bad = json.dumps({
-            "candidate_id": 1, "metric_before": 1000.0,
+            "candidate_id": 1, "metric_before": 3.0,
             "subagent_result": {
                 "metric_value": 1100.0, "reps_used": 3, "confidence_ratio": 5.0,
                 "status": "regressed", "files_modified": [],
@@ -1041,18 +1087,18 @@ class TestCommitKept:
         assert r.returncode == 1
         assert "reset-tree" in r.stderr
 
-    def test_empty_commit_downgrades_to_errored(self, tmp_path: Path) -> None:
-        # "improved" claimed but no net working-tree change → git refuses the
-        # empty commit → recorded as errored, no kept commit.
+    def test_refuses_when_no_net_change(self, tmp_path: Path) -> None:
+        # "improved" claimed but the tree is unchanged → re-measurement shows no
+        # improvement → refuse (no keep). (The empty-commit downgrade is now only
+        # reachable via the bypass; the seam catches no-change first.)
         self._setup(tmp_path)
         r = _run_cli("commit-kept", cwd=tmp_path, input=self._improved_payload())
-        assert r.returncode == 0, r.stderr
-        assert json.loads(r.stdout)["new_status"] == "errored"
+        assert r.returncode != 0
         assert self._kept_commits(tmp_path) == []
 
     def test_tier_a_already_recorded_skips_and_reconciles(self, tmp_path: Path) -> None:
         self._setup(tmp_path)
-        (tmp_path / "f.py").write_text("")
+        (tmp_path / "f.py").write_text("a = 1\n")  # real improvement (3 -> 1)
         assert _run_cli("commit-kept", cwd=tmp_path, input=self._improved_payload()).returncode == 0
         # Re-run the same candidate (crash-recovery) — must not double-commit/record.
         r2 = _run_cli("commit-kept", cwd=tmp_path, input=self._improved_payload())
@@ -1065,13 +1111,14 @@ class TestCommitKept:
         # Crash between `git commit` and the jsonl append: the kept commit exists
         # but there's no experiment record and the candidate is still pending.
         self._setup(tmp_path)
-        (tmp_path / "f.py").write_text("")
+        (tmp_path / "f.py").write_text("a = 1\n")  # real improvement
         subprocess.run(["git", "add", "-A"], check=True, cwd=tmp_path)
         subprocess.run(
-            ["git", "commit", "-m", "kept: a (Δ-100)"],
+            ["git", "commit", "-m", "kept: a (Δ-2)"],
             check=True, cwd=tmp_path, capture_output=True,
         )
-        # No record written. Now commit-kept must NOT create a second commit.
+        # No record written. commit-kept re-measures the committed tree (1 line, an
+        # improvement) → honors recovery, no duplicate commit.
         r = _run_cli("commit-kept", cwd=tmp_path, input=self._improved_payload())
         assert r.returncode == 0, r.stderr
         assert json.loads(r.stdout)["new_status"] == "kept"
